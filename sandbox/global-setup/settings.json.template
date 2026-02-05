@@ -17,7 +17,9 @@
       "Bash(~/.claude/hpc-toolkit/bin/hpc workspace list*)",
       "Bash(~/.claude/hpc-toolkit/bin/hpc workspace status*)",
       "Bash(~/.claude/hpc-toolkit/bin/hpc --help*)",
-      "Bash(~/.claude/hpc-toolkit/bin/hpc * --help*)"
+      "Bash(~/.claude/hpc-toolkit/bin/hpc * --help*)",
+      "Bash(~/.claude/hpc-toolkit/bin/hpc submit*)",
+      "Bash(~/.claude/hpc-toolkit/bin/hpc cancel*)"
     ],
     "ask": [
       "Bash(~/.claude/hpc-toolkit/bin/hpc git push*)",
@@ -31,8 +33,6 @@
       "Bash(~/.claude/hpc-toolkit/bin/hpc file mv*)",
       "Bash(~/.claude/hpc-toolkit/bin/hpc file write*)",
       "Bash(~/.claude/hpc-toolkit/bin/hpc file mkdir*)",
-      "Bash(~/.claude/hpc-toolkit/bin/hpc submit*)",
-      "Bash(~/.claude/hpc-toolkit/bin/hpc cancel*)",
       "Bash(~/.claude/hpc-toolkit/bin/hpc workspace init*)",
       "Bash(~/.claude/hpc-toolkit/bin/hpc workspace sync*)",
       "Bash(~/.claude/hpc-toolkit/bin/hpc workspace destroy*)"
