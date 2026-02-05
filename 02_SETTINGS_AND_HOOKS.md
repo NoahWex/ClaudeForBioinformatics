@@ -84,6 +84,26 @@ This minimal version commits no permissions, leaving them for local configuratio
 
 ## Permission Patterns
 
+### Permission Types
+
+| Type | Behavior |
+|------|----------|
+| `allow` | Auto-approve, no prompt |
+| `ask` | Yes/No prompt every time (no "always allow" option) |
+| `deny` | Block entirely |
+
+```json
+{
+  "permissions": {
+    "allow": ["Bash(ls:*)"],     // Auto-approved
+    "ask": ["Bash(rm -rf:*)"],   // Always prompts yes/no
+    "deny": ["Bash(shutdown:*)"] // Blocked
+  }
+}
+```
+
+**Use `ask` for destructive operations** you want to review but not block entirely.
+
 ### Command Permissions
 
 ```json
@@ -242,16 +262,34 @@ Include mature codebases as references:
 ]
 ```
 
-### HPC Operations
+### HPC Operations (with Toolkit)
+
+Split read-only commands (auto-allow) from destructive operations (always prompt):
 
 ```json
 "allow": [
-  "Bash(sbatch:*)",
-  "Bash(squeue:*)",
-  "Bash(sacct:*)",
-  "Bash(scancel:*)"
+  "Bash(~/.claude/hpc-toolkit/bin/hpc status*)",
+  "Bash(~/.claude/hpc-toolkit/bin/hpc logs*)",
+  "Bash(~/.claude/hpc-toolkit/bin/hpc file ls*)",
+  "Bash(~/.claude/hpc-toolkit/bin/hpc file cat*)",
+  "Bash(~/.claude/hpc-toolkit/bin/hpc git status*)",
+  "Bash(~/.claude/hpc-toolkit/bin/hpc git log*)",
+  "Bash(~/.claude/hpc-toolkit/bin/hpc git diff*)",
+  "Bash(~/.claude/hpc-toolkit/bin/hpc workspace list*)",
+  "Bash(~/.claude/hpc-toolkit/bin/hpc --help*)"
+],
+"ask": [
+  "Bash(~/.claude/hpc-toolkit/bin/hpc submit*)",
+  "Bash(~/.claude/hpc-toolkit/bin/hpc cancel*)",
+  "Bash(~/.claude/hpc-toolkit/bin/hpc git push*)",
+  "Bash(~/.claude/hpc-toolkit/bin/hpc git commit*)",
+  "Bash(~/.claude/hpc-toolkit/bin/hpc file rm*)",
+  "Bash(~/.claude/hpc-toolkit/bin/hpc file mv*)",
+  "Bash(~/.claude/hpc-toolkit/bin/hpc workspace sync*)"
 ]
 ```
+
+This pattern ensures destructive HPC operations always prompt yes/no without the option to auto-approve permanently.
 
 ### Git Operations
 

@@ -1,8 +1,41 @@
 {
   "permissions": {
     "allow": [
-      "Bash(~/.claude/hpc-toolkit/bin/hpc *)",
-      "Bash(ssh SSH_ALIAS *)"
+      "WebFetch",
+      "Bash(~/.claude/hpc-toolkit/bin/hpc status*)",
+      "Bash(~/.claude/hpc-toolkit/bin/hpc logs*)",
+      "Bash(~/.claude/hpc-toolkit/bin/hpc file ls*)",
+      "Bash(~/.claude/hpc-toolkit/bin/hpc file cat*)",
+      "Bash(~/.claude/hpc-toolkit/bin/hpc file head*)",
+      "Bash(~/.claude/hpc-toolkit/bin/hpc file tail*)",
+      "Bash(~/.claude/hpc-toolkit/bin/hpc git status*)",
+      "Bash(~/.claude/hpc-toolkit/bin/hpc git log*)",
+      "Bash(~/.claude/hpc-toolkit/bin/hpc git diff*)",
+      "Bash(~/.claude/hpc-toolkit/bin/hpc git show*)",
+      "Bash(~/.claude/hpc-toolkit/bin/hpc git branch -v*)",
+      "Bash(~/.claude/hpc-toolkit/bin/hpc git remote -v*)",
+      "Bash(~/.claude/hpc-toolkit/bin/hpc workspace list*)",
+      "Bash(~/.claude/hpc-toolkit/bin/hpc workspace status*)",
+      "Bash(~/.claude/hpc-toolkit/bin/hpc --help*)",
+      "Bash(~/.claude/hpc-toolkit/bin/hpc * --help*)"
+    ],
+    "ask": [
+      "Bash(~/.claude/hpc-toolkit/bin/hpc git push*)",
+      "Bash(~/.claude/hpc-toolkit/bin/hpc git commit*)",
+      "Bash(~/.claude/hpc-toolkit/bin/hpc git add*)",
+      "Bash(~/.claude/hpc-toolkit/bin/hpc git reset*)",
+      "Bash(~/.claude/hpc-toolkit/bin/hpc git checkout*)",
+      "Bash(~/.claude/hpc-toolkit/bin/hpc git merge*)",
+      "Bash(~/.claude/hpc-toolkit/bin/hpc git rebase*)",
+      "Bash(~/.claude/hpc-toolkit/bin/hpc file rm*)",
+      "Bash(~/.claude/hpc-toolkit/bin/hpc file mv*)",
+      "Bash(~/.claude/hpc-toolkit/bin/hpc file write*)",
+      "Bash(~/.claude/hpc-toolkit/bin/hpc file mkdir*)",
+      "Bash(~/.claude/hpc-toolkit/bin/hpc submit*)",
+      "Bash(~/.claude/hpc-toolkit/bin/hpc cancel*)",
+      "Bash(~/.claude/hpc-toolkit/bin/hpc workspace init*)",
+      "Bash(~/.claude/hpc-toolkit/bin/hpc workspace sync*)",
+      "Bash(~/.claude/hpc-toolkit/bin/hpc workspace destroy*)"
     ]
   },
   "hooks": {

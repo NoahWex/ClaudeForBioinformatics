@@ -4,7 +4,6 @@
       "Bash(ls:*)",
       "Bash(mkdir:*)",
       "Bash(cp:*)",
-      "Bash(mv:*)",
       "Bash(chmod:*)",
       "Bash(touch:*)",
       "Bash(wc:*)",
@@ -17,6 +16,13 @@
       "WebSearch",
       "Skill(project-status)",
       "Skill(project-discovery)"
+    ],
+    "ask": [
+      "Bash(rm -rf:*)",
+      "Bash(mv:*)",
+      "Bash(git push:*)",
+      "Bash(git commit:*)",
+      "Bash(git reset:*)"
     ],
     "deny": [],
     "additionalDirectories": []

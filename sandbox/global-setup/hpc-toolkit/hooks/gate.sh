@@ -117,7 +117,12 @@ if is_local_git_write "$COMMAND"; then
     exit 0
 fi
 
-is_hpc_command "$COMMAND" || exit 0
+is_hpc_command "$COMMAND" || is_toolkit_command "$COMMAND" || exit 0
+
+# All toolkit commands pass through to Claude Code's permission system
+# - Read-only ops (status, logs, file cat, git log, etc.) are in settings.json allow list → no prompt
+# - Destructive ops (submit, git push, file rm, etc.) are in settings.json ask list → yes/no prompt
+is_toolkit_command "$COMMAND" && exit 0
 
 # Helper: inject docs on first HPC command if not yet shown
 maybe_inject_docs() {
@@ -127,15 +132,6 @@ maybe_inject_docs() {
         echo "=== HPC TOOLKIT GUIDE ===\n$DOCS\n=== END GUIDE ==="
     fi
 }
-
-# Toolkit commands pass (with docs on first use)
-if is_toolkit_command "$COMMAND"; then
-    DOCS_MSG=$(maybe_inject_docs)
-    if [ -n "$DOCS_MSG" ]; then
-        json_allow "$DOCS_MSG"
-    fi
-    exit 0
-fi
 
 # SSH commands to HPC
 if is_hpc_ssh "$COMMAND"; then
