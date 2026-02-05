@@ -1,0 +1,21 @@
+# Data Manifest
+# Source of truth for input data paths
+
+version: "1.0"
+description: "Input data registry for this project"
+
+# Example entry:
+# datasets:
+#   sample_data:
+#     path: /share/crsp/lab/your_lab/data/sample.h5ad
+#     description: "Sample AnnData object"
+#     format: h5ad
+#     size: "1.2GB"
+
+datasets: {}
+
+# Reference data
+references:
+  # example:
+  #   path: /path/to/reference
+  #   description: "Reference dataset"

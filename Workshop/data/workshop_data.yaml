@@ -1,0 +1,88 @@
+# =============================================================================
+# Workshop Data Manifest
+# =============================================================================
+# Single source of truth for workshop dataset location.
+# Uses Gray et al. dataset from iHBCA component studies.
+#
+# Usage: Load this manifest to resolve data paths in workshop scripts.
+# =============================================================================
+
+version: "2.0"
+created: "2026-02-03"
+updated: "2026-02-03"
+purpose: "Claude for Bioinformatics Workshop - scRNA-seq analysis with Claude Code"
+
+# Base paths (HPC and local CRSP mount)
+paths:
+  hpc: "/share/crsp/lab/dalawson/share/3_Downloaded_Datasets/iHBCA_Reed_2024/component_studies"
+  local: "/Users/NoahWechter/Library/Application Support/CRSP Desktop/Volumes.noindex/CRSP Lab - dalawson.localized/share/3_Downloaded_Datasets/iHBCA_Reed_2024/component_studies"
+
+# =============================================================================
+# WORKSHOP DATASET
+# =============================================================================
+
+dataset:
+  gray:
+    file: "gray.rds"
+    cells: 52681
+    genes: 20052
+    size_mb: 255
+    embedding: "PCA (50d, recomputed)"
+    description: "Gray et al. breast tissue scRNA-seq (CELLxGENE)"
+    source: "Gray et al. 2022, Cell Genomics"
+
+    # Verified metadata columns (2026-02-03)
+    metadata_columns:
+      # Cell type annotations
+      cell_type: "cell_type"           # 6 unique: basal cell, fibroblast, lactocyte, leukocyte, progenitor cell of mammary luminal epithelium, vascular lymphangioblast
+      cell_subtype: "cellSubtype"      # 19 unique: HSb, AP, VE, F3, BL, HSa, PE, doublet, F2, T, ...
+
+      # Sample/batch info
+      sample: "donor_id"               # 16 unique donors
+      genotype: "genotype_1"           # BRCA1, BRCA2, WT, RAD51C
+
+      # Clinical metadata
+      surgery_type: "surgeryType"
+      menopause: "menopause"
+      pregnancies: "numberOfPregnancies"
+
+      # QC metrics (pre-computed)
+      percent_mt: "percent.mt"
+      n_counts: "nCount_RNA"
+      n_features: "nFeature_RNA"
+
+    # Cell type labels (for exercises)
+    cell_types:
+      L1:  # Broad categories
+        - "basal cell"
+        - "fibroblast"
+        - "lactocyte"
+        - "leukocyte"
+        - "progenitor cell of mammary luminal epithelium"
+        - "vascular lymphangioblast"
+
+    notes: |
+      Well-annotated dataset with rich clinical metadata.
+      Good size for interactive exploration and HPC demos.
+      16 donors enables array job demonstrations.
+
+# =============================================================================
+# DATA PROVENANCE
+# =============================================================================
+
+provenance:
+  original_source: "Gray et al. 2022, Cell Genomics"
+  ihbca_source: "Reed et al. 2024, Nature Genetics (iHBCA)"
+  cxg_collection: "CELLxGENE"
+  download_date: "2026-01-02"
+  processing: "PCA recomputed (original had UMAP only)"
+
+# =============================================================================
+# WORKSHOP USAGE
+# =============================================================================
+
+session_focus:
+  day1: "Project setup, data loading, initial exploration"
+  day2: "Metadata deep-dive, QC assessment, filtering decisions"
+  day3: "HPC processing pipeline (array jobs across 16 donors)"
+  day4: "Visualization, reporting, Claude customization"

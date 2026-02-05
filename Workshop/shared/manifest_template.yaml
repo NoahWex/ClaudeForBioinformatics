@@ -1,0 +1,96 @@
+# Manifest Template
+#
+# Copy this file to your project directory and customize.
+# This template contains all available configuration options.
+
+project_name: my_project
+author: Your Name
+date_created: 2024-01-01
+
+# ==============================================================================
+# Data Configuration
+# ==============================================================================
+data:
+  # Base path for data files (relative to manifest location)
+  base_path: data/raw
+
+  # Define each study/dataset
+  studies:
+    study1:
+      file: study1.rds
+      description: Description of study 1
+      n_cells: 10000
+      cell_type_column: cell_type
+      batch_column: sample_id
+
+    study2:
+      file: study2.rds
+      description: Description of study 2
+      n_cells: 15000
+      cell_type_column: celltype
+      batch_column: batch
+
+# ==============================================================================
+# Metadata Harmonization
+# ==============================================================================
+harmonization:
+  # Column names after harmonization
+  unified_columns:
+    cell_type: cell_type_harmonized
+    sample_id: sample_harmonized
+    study: study_source
+
+  # Map original labels to harmonized labels
+  cell_type_map:
+    # Format: "original_label": "harmonized_label"
+    "Cell Type A": "TypeA"
+    "CellTypeA": "TypeA"
+    "Cell Type B": "TypeB"
+
+# ==============================================================================
+# Quality Control Parameters
+# ==============================================================================
+qc:
+  # Cell filtering
+  min_genes: 200        # Minimum genes per cell
+  max_genes: 5000       # Maximum genes per cell (doublet filter)
+  min_cells: 3          # Minimum cells per gene
+  max_mito_pct: 20      # Maximum mitochondrial percentage
+
+  # Normalization
+  normalization_method: LogNormalize  # LogNormalize, SCTransform
+  scale_factor: 10000
+
+  # Variable features
+  n_variable_features: 2000
+  selection_method: vst  # vst, mean.var.plot, dispersion
+
+# ==============================================================================
+# Integration Parameters
+# ==============================================================================
+integration:
+  method: harmony       # harmony, seurat_cca, seurat_rpca
+  batch_key: study_source
+  dims: 30              # Number of dimensions for integration
+  resolution: 0.5       # Clustering resolution
+
+# ==============================================================================
+# Output Directories
+# ==============================================================================
+outputs:
+  processed_dir: outputs/processed
+  integrated_dir: outputs/integrated
+  reports_dir: reports
+  figures_dir: outputs/figures
+  logs_dir: outputs/logs
+
+# ==============================================================================
+# HPC Configuration (UCI HPC3)
+# ==============================================================================
+hpc:
+  account: your_lab_account
+  partition: standard
+  default_time: "2:00:00"
+  default_memory: "32G"
+  default_cpus: 4
+  container: /path/to/container.sif

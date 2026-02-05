@@ -1,0 +1,59 @@
+# Generic SLURM Profile
+# Template for non-UCI SLURM clusters
+
+name: generic-slurm
+description: Generic SLURM cluster template
+
+cluster:
+  hostname: your.cluster.edu     # CHANGE THIS
+  ssh_alias: cluster             # CHANGE THIS - match your ~/.ssh/config
+  partition: default             # CHANGE THIS
+  partitions_available:
+    - default
+    - gpu
+    - highmem
+  default_account: ""            # Set in sandbox.yaml
+
+authentication:
+  method: ssh_key
+  duo_required: false
+  control_persist: 1h
+  notes: "Adjust control_persist based on your cluster's session timeout"
+
+paths:
+  storage_base: /path/to/storage   # CHANGE THIS
+  containers: /path/to/containers  # CHANGE THIS
+  home: /home                      # CHANGE THIS if needed
+
+storage:
+  primary:
+    description: "Primary storage"
+    mount: /path/to/storage
+    quota_default: "varies"
+    backup: "varies"
+  scratch:
+    description: "Scratch space"
+    mount: /scratch
+    quota_default: "none"
+    backup: false
+
+modules:
+  singularity: singularity         # May vary by cluster
+  python: python                   # May vary by cluster
+  r: R                             # May vary by cluster
+
+# Container paths - fill in for your cluster
+container_paths:
+  # r_spatial: /path/to/r_container.sif
+  # python_env: /path/to/python_container.sif
+
+documentation:
+  # Add your cluster's documentation URLs
+  # main: https://your.cluster.edu/docs
+  # slurm: https://your.cluster.edu/slurm
+
+# Notes for customization:
+# 1. Update all paths for your cluster
+# 2. Verify module names with 'module avail'
+# 3. Adjust authentication settings
+# 4. Add container paths if available

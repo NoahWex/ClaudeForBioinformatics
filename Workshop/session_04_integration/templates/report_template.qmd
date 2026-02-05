@@ -1,0 +1,217 @@
+---
+title: "Breast Tissue scRNA-seq Integration Report"
+author: "Workshop Participant"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    toc-location: left
+    code-fold: true
+    code-summary: "Show code"
+    theme: cosmo
+    self-contained: true
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+```{r setup}
+#| include: false
+
+library(Seurat)
+library(ggplot2)
+library(dplyr)
+library(knitr)
+library(yaml)
+
+# Paths
+project_dir <- ".."
+manifest <- yaml::read_yaml(file.path(project_dir, "manifest.yaml"))
+```
+
+## Introduction
+
+This report documents the integration of human breast tissue single-cell RNA-seq data from the iHBCA component studies (Reed et al., 2024, Nature Genetics).
+
+**Project**: `r manifest$project_name`
+
+**Datasets integrated**:
+
+- Gray et al. - Human breast epithelial cells
+- Pal et al. - Breast tissue atlas
+
+**Objective**: Create a unified reference of breast tissue cell types by harmonizing and integrating these complementary datasets.
+
+## Methods
+
+### Data Processing Pipeline
+
+1. **Quality Control**: Cells filtered based on:
+   - Minimum genes: `r manifest$qc$min_genes`
+   - Maximum genes: `r manifest$qc$max_genes`
+   - Maximum mitochondrial %: `r manifest$qc$max_mito_pct`
+
+2. **Normalization**: `r manifest$qc$normalization_method` with scale factor `r manifest$qc$scale_factor`
+
+3. **Feature Selection**: `r manifest$qc$n_variable_features` variable features using `r manifest$qc$selection_method` method
+
+4. **Integration**: `r manifest$integration$method` using `r manifest$integration$dims` dimensions
+
+5. **Clustering**: Resolution `r manifest$integration$resolution`
+
+## Data Overview
+
+### Cell Counts by Study
+
+```{r}
+#| label: tbl-cell-counts
+#| tbl-cap: "Cell counts per study after QC"
+
+# Load integrated object
+obj <- readRDS(file.path(project_dir, "outputs/integrated/integrated.rds"))
+
+cell_counts <- obj@meta.data %>%
+  group_by(study_source) %>%
+  summarise(
+    `Total Cells` = n(),
+    `Cell Types` = n_distinct(cell_type_harmonized)
+  )
+
+kable(cell_counts)
+```
+
+### Cell Type Composition
+
+```{r}
+#| label: tbl-cell-types
+#| tbl-cap: "Cell counts by type and study"
+
+type_counts <- obj@meta.data %>%
+  group_by(study_source, cell_type_harmonized) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  tidyr::pivot_wider(
+    names_from = study_source,
+    values_from = n,
+    values_fill = 0
+  )
+
+kable(type_counts)
+```
+
+## Quality Control Summary
+
+### QC Metrics Distribution
+
+```{r}
+#| label: fig-qc
+#| fig-cap: "Quality control metrics for integrated data"
+#| fig-width: 10
+#| fig-height: 4
+
+# If QC figures exist, include them
+qc_fig <- file.path(project_dir, "outputs/figures/gray_qc_report.pdf")
+if (file.exists(qc_fig)) {
+  knitr::include_graphics(qc_fig)
+} else {
+  # Generate basic QC plot
+  VlnPlot(obj, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"),
+          group.by = "study_source", pt.size = 0, ncol = 3)
+}
+```
+
+## Integration Results
+
+### UMAP Visualization
+
+The UMAP plots below show the integrated data. Good integration is indicated by:
+
+- Mixing of cells from different studies (left panel)
+- Preservation of cell type identity (right panel)
+
+```{r}
+#| label: fig-umap-study
+#| fig-cap: "UMAP colored by study source"
+#| fig-width: 6
+#| fig-height: 5
+
+DimPlot(obj, group.by = "study_source", pt.size = 0.1) +
+  theme_classic() +
+  ggtitle("Study of Origin")
+```
+
+```{r}
+#| label: fig-umap-celltype
+#| fig-cap: "UMAP colored by harmonized cell type"
+#| fig-width: 8
+#| fig-height: 6
+
+DimPlot(obj, group.by = "cell_type_harmonized", pt.size = 0.1, label = TRUE, label.size = 3) +
+  theme_classic() +
+  ggtitle("Cell Types")
+```
+
+### Cell Type Proportions
+
+```{r}
+#| label: fig-proportions
+#| fig-cap: "Cell type proportions by study"
+#| fig-width: 8
+#| fig-height: 5
+
+props <- obj@meta.data %>%
+  group_by(study_source, cell_type_harmonized) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  group_by(study_source) %>%
+  mutate(prop = n / sum(n))
+
+ggplot(props, aes(x = study_source, y = prop, fill = cell_type_harmonized)) +
+  geom_col() +
+  theme_classic() +
+  labs(x = "Study", y = "Proportion", fill = "Cell Type") +
+  theme(legend.position = "right")
+```
+
+## Marker Gene Expression
+
+```{r}
+#| label: fig-markers
+#| fig-cap: "Expression of canonical marker genes"
+#| fig-width: 10
+#| fig-height: 8
+
+markers <- c("EPCAM", "KRT8", "KRT5", "PTPRC", "CD3D", "CD68", "COL1A1", "PECAM1")
+markers_present <- markers[markers %in% rownames(obj)]
+
+if (length(markers_present) > 0) {
+  FeaturePlot(obj, features = markers_present, ncol = 4, pt.size = 0.1)
+}
+```
+
+## Conclusions
+
+This integration successfully combined `r ncol(obj)` cells from `r length(unique(obj$study_source))` studies:
+
+1. **Data quality**: QC filtering removed low-quality cells while preserving biological diversity
+2. **Integration**: Harmony effectively removed batch effects while preserving cell type identity
+3. **Cell types**: `r length(unique(obj$cell_type_harmonized))` harmonized cell types identified
+
+### Key Findings
+
+- [Add your key findings here]
+- [Note any unexpected results]
+- [Describe cell type distributions]
+
+## Session Information
+
+```{r}
+#| label: session-info
+#| echo: true
+
+sessionInfo()
+```
+
+---
+
+*Report generated with Claude Code Workshop materials*

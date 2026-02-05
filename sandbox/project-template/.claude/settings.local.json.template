@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Read",
+      "Glob",
+      "Grep",
+      "Bash(ssh hpc3 squeue *)",
+      "Bash(ssh hpc3 sacct *)",
+      "Bash(ssh hpc3 ls *)",
+      "Bash(ssh hpc3 cat *)",
+      "Bash(ssh hpc3 tail *)"
+    ],
+    "deny": []
+  },
+  "model": "sonnet",
+  "rules": {
+    "load": [
+      ".claude/rules/*.md"
+    ]
+  }
+}

@@ -1,0 +1,44 @@
+#!/bin/bash
+# HPC Toolkit Configuration
+# Copy to ~/.claude/hpc-toolkit/config.sh and edit for your environment.
+#
+# The hpc CLI and gate.sh hook source this file on startup.
+# All values have sensible defaults — only set what differs for you.
+
+# ---------------------------------------------------------------------------
+# SSH alias for your HPC cluster (must match ~/.ssh/config Host entry)
+# ---------------------------------------------------------------------------
+SSH_ALIAS="hpc3"
+
+# ---------------------------------------------------------------------------
+# CRSP mount paths (for automatic CWD → HPC path mapping)
+#
+# CRSP_MAC_PREFIX: The macOS mount point for your lab's CRSP share.
+#   The mount name varies by user/share. Find yours with:
+#
+#     ls "$HOME/Library/Application Support/CRSP Desktop/Volumes.noindex/"
+#
+#   Examples:
+#     "CRSP Lab - dalawson.localized"
+#     "CRSP Lab - Lawson Lab.localized"
+#     "CRSP Lab - yourlab.localized"
+#
+# CRSP_HPC_PREFIX: The corresponding path on HPC.
+#   Typically /share/crsp/lab/YOUR_LAB
+# ---------------------------------------------------------------------------
+# TODO: Update this path to match your mount name from the ls command above
+CRSP_MAC_PREFIX="$HOME/Library/Application Support/CRSP Desktop/Volumes.noindex/CRSP Lab - dalawson.localized"
+CRSP_HPC_PREFIX="/share/crsp/lab/dalawson"
+
+# ---------------------------------------------------------------------------
+# HPC username (leave blank to auto-detect via SSH)
+# ---------------------------------------------------------------------------
+HPC_USER=""
+
+# ---------------------------------------------------------------------------
+# Default repo path on HPC (optional)
+#
+# Used as fallback when hpc git can't determine the repo from CWD or --repo.
+# Set to your primary project's HPC path, or leave blank.
+# ---------------------------------------------------------------------------
+FALLBACK_REPO=""

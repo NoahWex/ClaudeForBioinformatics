@@ -1,0 +1,40 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls:*)",
+      "Bash(mkdir:*)",
+      "Bash(cp:*)",
+      "Bash(mv:*)",
+      "Bash(chmod:*)",
+      "Bash(touch:*)",
+      "Bash(wc:*)",
+      "Bash(python3:*)",
+      "Bash(Rscript:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git check-ignore:*)",
+      "WebSearch",
+      "Skill(project-status)",
+      "Skill(project-discovery)"
+    ],
+    "deny": [],
+    "additionalDirectories": []
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cat .claude/trace-framework.md"
+          }
+        ]
+      }
+    ]
+  },
+  "enabledPlugins": {
+    "r-lsp": true,
+    "pyright-lsp@claude-plugins-official": true
+  }
+}

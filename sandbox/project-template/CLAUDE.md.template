@@ -1,0 +1,63 @@
+# CLAUDE.md
+
+## Project Overview
+
+**Project Name**: YOUR_PROJECT_NAME
+**Description**: Brief description of project goals and scope.
+
+## Quick Reference
+
+### Key Paths
+
+| Item | Path |
+|------|------|
+| Data | `project/data/` |
+| Scripts | `project/scripts/` |
+| Outputs | `project/outputs/` |
+| Config | `project/config/` |
+
+### HPC Environment
+
+| Item | Value |
+|------|-------|
+| Cluster | UCI HPC3 |
+| Account | YOUR_ACCOUNT |
+| Partition | standard |
+
+**Containers:**
+- R: `/dfs7/singularity_containers/rcic/JHUB3/Rocky8_jupyter_base_R4.3.3_Spatial.sif`
+- Python: `/dfs8/singularity_containers/rcic/devel/Jupyter_R_4.4.2_Giotto_Spatial_Python_2025Q2.sif`
+
+## Manifests
+
+Maintain these as sources of truth:
+
+| File | Purpose |
+|------|---------|
+| `project/config/data_manifest.yaml` | Input data paths |
+| `project/config/outputs_manifest.yaml` | Generated outputs |
+
+Scripts load from manifests, never hardcode paths.
+
+## Workflow
+
+1. **Add data** - Register in data_manifest.yaml
+2. **Create script** - Put in project/scripts/
+3. **Run job** - Use hpc-submit wrapper
+4. **Track output** - Register in outputs_manifest.yaml
+
+## HPC Job Submission
+
+Raw sbatch is blocked. Use the wrapper:
+
+```bash
+~/.claude/plugins/hpc-sandbox/bin/hpc-submit \
+  --script project/run/script.sh \
+  --purpose "Why this job" \
+  --outputs "project/outputs/result.rds"
+```
+
+## Skills
+
+Available via Skill tool:
+- (Add custom skills as needed)

@@ -1,0 +1,47 @@
+# Experiment Metadata Template
+# Copy this to your experiment directory as experiment_metadata.yaml
+
+experiment_name: experiment_name_YYYYMMDD
+original_name: experiment_name
+research_area: ResearchArea  # Integration, CellAnnotation, DifferentialAbundance, SpatialAnalysis, QualityControl
+created_date: 'YYYY-MM-DD'
+status: development  # development | complete | deprecated
+version: '0.1'
+
+description: |
+  Brief description of what this experiment aims to accomplish.
+  Can be multiple lines.
+
+tags:
+  - tag1
+  - tag2
+  - development
+
+output_paths:
+  intermediate: outputs/experiment_name_YYYYMMDD/intermediate
+  results: outputs/experiment_name_YYYYMMDD/results
+
+# Outputs produced by this experiment
+key_outputs: []
+# Example when populated:
+# key_outputs:
+#   - clustering_results.rds
+#   - da_results.csv
+#   - final_report.html
+
+# Dependencies on other outputs
+dependencies: []
+# Example:
+# dependencies:
+#   - preprocessing.full_cohort.milo
+#   - ihbca_annotation_20251216.cluster_annotations
+
+# When experiment is complete, define contributions for reuse
+# contributions:
+#   - name: sample_clusters
+#     type: sample_annotations
+#     file: results/clustering_results.csv
+#     columns: [sample_id, cluster]
+#     join_key: sample_id
+#     scope: full_cohort
+#     description: "Sample cluster assignments based on composition profiles"

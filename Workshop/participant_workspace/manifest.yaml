@@ -1,0 +1,86 @@
+# Workshop Manifest - Participant Configuration
+# Fill in this file as you progress through the workshop
+#
+# This manifest drives data loading and processing scripts.
+# Keys marked with TODO need your input.
+
+project_name: breast_tissue_analysis
+author: # TODO: Your name
+date_created: # TODO: YYYY-MM-DD
+
+# ==============================================================================
+# Data Source
+# ==============================================================================
+# Gray et al. breast tissue scRNA-seq dataset from iHBCA
+# Paths work on both HPC and local CRSP mount.
+
+data:
+  # Use HPC path when running jobs, local path for development
+  base_path_hpc: /share/crsp/lab/dalawson/share/3_Downloaded_Datasets/iHBCA_Reed_2024/component_studies
+  base_path_local: # TODO: Fill in your local CRSP mount path
+
+  # Workshop data manifest for reference
+  source_manifest: ../data/workshop_data.yaml
+
+  # Dataset info
+  gray:
+    file: gray.rds
+    description: Gray et al. breast tissue scRNA-seq (CELLxGENE)
+    n_cells: 52681
+    n_genes: 20052
+
+    # Key metadata columns (verified)
+    columns:
+      cell_type: cell_type           # 6 cell types
+      cell_subtype: cellSubtype      # 19 subtypes
+      sample: donor_id               # 16 donors
+      genotype: genotype_1           # BRCA1, BRCA2, WT, RAD51C
+
+    # Cell types in this dataset
+    cell_types:
+      - basal cell
+      - fibroblast
+      - lactocyte
+      - leukocyte
+      - progenitor cell of mammary luminal epithelium
+      - vascular lymphangioblast
+
+# ==============================================================================
+# QC Parameters (Day 2-3)
+# ==============================================================================
+qc:
+  # Filtering thresholds - adjust based on your exploration
+  min_genes: 200
+  max_genes: 5000
+  max_mito_pct: 20
+
+  # Normalization
+  normalization_method: LogNormalize
+  scale_factor: 10000
+
+  # Variable features
+  n_variable_features: 2000
+  selection_method: vst
+
+# ==============================================================================
+# Output Configuration
+# ==============================================================================
+outputs:
+  processed_dir: outputs/processed
+  figures_dir: outputs/figures
+  reports_dir: reports
+
+# ==============================================================================
+# HPC Configuration (Day 3)
+# ==============================================================================
+hpc:
+  account: dalawson_lab
+  partition: standard
+  default_time: "2:00:00"
+  default_memory: "32G"
+
+  # Container with R/Seurat (verified path)
+  container: /share/crsp/lab/dalawson/share/0_Resources/containers/r_seurat_4.4.2.sif
+
+  # Array job config (16 donors)
+  array_max: 15  # 0-15 for 16 donors

@@ -1,0 +1,1129 @@
+#!/bin/bash
+# hpc - Unified CLI for HPC operations
+# Usage: hpc <command> [args]
+
+set -eo pipefail
+
+# ---------- User configuration (override via config.sh) ----------
+# Source user config if it exists. Create from config.sh.template.
+CONFIG_FILE="$HOME/.claude/hpc-toolkit/config.sh"
+if [[ -f "$CONFIG_FILE" ]]; then
+    # shellcheck source=/dev/null
+    source "$CONFIG_FILE"
+fi
+
+# Defaults (overridden by config.sh values)
+HPC_HOST="${SSH_ALIAS:-hpc3}"
+AUDIT_LOG="$HOME/.claude/hpc-toolkit/logs/audit.jsonl"
+TOOLKIT_DIR="$HOME/.claude/hpc-toolkit"
+MIRROR_BASE="/pub/\$USER/git-mirrors"  # expanded on HPC side
+
+# Colors
+BOLD='\033[1m'
+DIM='\033[2m'
+GREEN='\033[32m'
+YELLOW='\033[33m'
+RED='\033[31m'
+RESET='\033[0m'
+
+# ============================================================================
+# Utility Functions
+# ============================================================================
+log_audit() {
+    local cmd="$1"
+    shift
+    local ts=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+    mkdir -p "$(dirname "$AUDIT_LOG")"
+    echo "{\"ts\":\"$ts\",\"cmd\":\"$cmd\",$*}" >> "$AUDIT_LOG"
+}
+
+die() {
+    echo -e "${RED}ERROR: $1${RESET}" >&2
+    exit 1
+}
+
+require_arg() {
+    local name="$1"
+    local value="$2"
+    [[ -z "$value" ]] && die "--$name is required" || true
+}
+
+# ============================================================================
+# Help
+# ============================================================================
+show_help() {
+    cat << 'EOF'
+hpc - Unified CLI for UCI HPC3 operations
+
+USAGE:
+  hpc <command> [args]
+
+COMMANDS:
+  submit      Submit a batch job
+  shell       Start interactive session
+  status      Check jobs (squeue)
+  logs        View job output
+  cancel      Cancel a job
+  file        File operations (ls, cat, rm, cp, mv, write)
+  git         Git operations (login node, no srun)
+  workspace   Manage fast git mirrors on DFS
+
+EXAMPLES:
+  hpc submit /path/script.sh --purpose "Run analysis" --outputs "/path/results/"
+  hpc shell --purpose "Debug issue" --time 1:00:00
+  hpc status
+  hpc logs 12345678
+  hpc cancel 12345678 --reason "Wrong parameters"
+  hpc file ls /share/crsp/lab/YOUR_LAB/YOUR_USER/
+  hpc git status
+  hpc git log --oneline -5
+  hpc workspace init /share/crsp/lab/YOUR_LAB/YOUR_USER/YOUR_PROJECT
+  hpc workspace list
+
+Run 'hpc <command> --help' for command-specific help.
+EOF
+}
+
+# ============================================================================
+# hpc submit
+# ============================================================================
+cmd_submit() {
+    local script=""
+    local purpose=""
+    local outputs=""
+    local sbatch_args=""
+    local dry_run=false
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --help|-h)
+                cat << 'EOF'
+hpc submit - Submit a batch job
+
+USAGE:
+  hpc submit <script_path> --purpose "..." --outputs "..." [options]
+
+REQUIRED:
+  <script_path>     Path to script ON HPC (must start with /)
+  --purpose "..."   Why running this job
+  --outputs "..."   Where outputs go
+
+OPTIONS:
+  --sbatch "..."    Pass-through sbatch args (--array, --mem, etc.)
+  --dry-run         Show what would happen without submitting
+
+EXAMPLE:
+  hpc submit /share/crsp/lab/YOUR_LAB/YOUR_USER/run.sh \
+    --purpose "Process batch 1" \
+    --outputs "/share/crsp/lab/YOUR_LAB/YOUR_USER/results/"
+EOF
+                return 0
+                ;;
+            --purpose) purpose="$2"; shift 2 ;;
+            --outputs) outputs="$2"; shift 2 ;;
+            --sbatch|--sbatch-args) sbatch_args="$2"; shift 2 ;;
+            --dry-run) dry_run=true; shift ;;
+            -*) die "Unknown option: $1" ;;
+            *) script="$1"; shift ;;
+        esac
+    done
+
+    require_arg "script (positional)" "$script"
+    require_arg "purpose" "$purpose"
+    require_arg "outputs" "$outputs"
+
+    # Validate script path
+    [[ "$script" != /* ]] && die "Script path must be absolute (start with /)"
+
+    # Check script exists on HPC
+    local script_check
+    script_check=$(ssh "$HPC_HOST" "test -f '$script' && echo 'exists' || echo 'missing'" 2>/dev/null)
+    [[ "$script_check" == "missing" ]] && die "Script not found on HPC: $script"
+
+    # Build sbatch command
+    local sbatch_cmd="sbatch --parsable"
+    [[ -n "$sbatch_args" ]] && sbatch_cmd+=" $sbatch_args"
+    sbatch_cmd+=" '$script'"
+
+    echo -e "${BOLD}Submitting:${RESET} $script"
+    echo -e "${BOLD}Purpose:${RESET} $purpose"
+    echo -e "${BOLD}Outputs:${RESET} $outputs"
+    [[ -n "$sbatch_args" ]] && echo -e "${BOLD}Extra args:${RESET} $sbatch_args"
+    echo ""
+
+    if [[ "$dry_run" == "true" ]]; then
+        echo -e "${YELLOW}[DRY RUN]${RESET} Would execute: ssh $HPC_HOST \"$sbatch_cmd\""
+        return 0
+    fi
+
+    local job_id
+    job_id=$(ssh "$HPC_HOST" "$sbatch_cmd" 2>&1) || true
+
+    if [[ -z "$job_id" ]] || [[ ! "$job_id" =~ ^[0-9]+$ ]]; then
+        die "Submission failed: $job_id"
+    fi
+
+    echo -e "${GREEN}Submitted job $job_id${RESET}"
+    log_audit "submit" "\"script\":\"$script\",\"purpose\":\"$purpose\",\"outputs\":\"$outputs\",\"job_id\":\"$job_id\""
+
+    echo ""
+    echo "Monitor: hpc status $job_id"
+    echo "Logs:    hpc logs $job_id"
+}
+
+# ============================================================================
+# hpc shell
+# ============================================================================
+cmd_shell() {
+    local purpose=""
+    local time=""
+    local cmd=""
+    local mem="4G"
+    local cpus="1"
+    local modules=()
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --help|-h)
+                cat << 'EOF'
+hpc shell - Run command on compute node
+
+USAGE:
+  hpc shell --cmd "..." --purpose "..." --time HH:MM:SS [options]
+
+REQUIRED:
+  --cmd "..."       Command to run
+  --purpose "..."   Why running this
+  --time HH:MM:SS   Max duration
+
+OPTIONS:
+  --mem SIZE        Memory (default: 4G)
+  --cpus N          CPUs (default: 1)
+  --module MOD      Load module before running (can repeat)
+
+EXAMPLE:
+  hpc shell --cmd "python test.py" --purpose "Test script" --time 0:30:00
+  hpc shell --cmd "Rscript analysis.R" --purpose "Run analysis" --time 2:00:00 --mem 16G
+  hpc shell --cmd "python -c 'import pandas'" --module python/3.10.2 --purpose "Test" --time 0:05:00
+EOF
+                return 0
+                ;;
+            --purpose) purpose="$2"; shift 2 ;;
+            --time) time="$2"; shift 2 ;;
+            --cmd) cmd="$2"; shift 2 ;;
+            --mem) mem="$2"; shift 2 ;;
+            --cpus) cpus="$2"; shift 2 ;;
+            --module) modules+=("$2"); shift 2 ;;
+            -*) die "Unknown option: $1" ;;
+            *) die "Unexpected argument: $1" ;;
+        esac
+    done
+
+    require_arg "cmd" "$cmd"
+    require_arg "purpose" "$purpose"
+    require_arg "time" "$time"
+
+    echo -e "${BOLD}Running on compute node${RESET}"
+    echo -e "${BOLD}Command:${RESET} $cmd"
+    echo -e "${BOLD}Purpose:${RESET} $purpose"
+    echo -e "${BOLD}Resources:${RESET} $time, $mem, $cpus CPUs"
+    if [[ ${#modules[@]+"1"} && ${#modules[@]} -gt 0 ]]; then
+        echo -e "${BOLD}Modules:${RESET} ${modules[*]}"
+    fi
+    echo ""
+
+    local modules_str=""
+    if [[ ${#modules[@]+"1"} && ${#modules[@]} -gt 0 ]]; then
+        modules_str="${modules[*]}"
+    fi
+    log_audit "shell" "\"purpose\":\"$purpose\",\"time\":\"$time\",\"cmd\":\"$cmd\",\"modules\":\"${modules_str}\""
+
+    # Build module load commands
+    local module_cmds=""
+    if [[ ${#modules[@]+"1"} && ${#modules[@]} -gt 0 ]]; then
+    for mod in "${modules[@]}"; do
+        module_cmds+="module load $mod && "
+    done
+    fi
+
+    # Execute srun (no TTY needed)
+    # Use base64 encoding to avoid quoting issues with complex commands
+    if [[ ${#modules[@]+"1"} && ${#modules[@]} -gt 0 ]]; then
+        local full_cmd="${module_cmds}${cmd}"
+        local encoded_cmd=$(echo "$full_cmd" | base64)
+        ssh "$HPC_HOST" "srun --time=$time --mem=$mem --cpus-per-task=$cpus bash -c 'echo $encoded_cmd | base64 -d | bash'"
+    else
+        ssh "$HPC_HOST" "srun --time=$time --mem=$mem --cpus-per-task=$cpus $cmd"
+    fi
+}
+
+# ============================================================================
+# hpc status
+# ============================================================================
+cmd_status() {
+    local job_id=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --help|-h)
+                cat << 'EOF'
+hpc status - Check job status
+
+USAGE:
+  hpc status              # All my jobs
+  hpc status <job_id>     # Specific job details
+EOF
+                return 0
+                ;;
+            -*) die "Unknown option: $1" ;;
+            *) job_id="$1"; shift ;;
+        esac
+    done
+
+    if [[ -n "$job_id" ]]; then
+        echo -e "${BOLD}Job $job_id:${RESET}"
+        ssh "$HPC_HOST" "squeue -j $job_id --format='%.18i %.9P %.30j %.8u %.8T %.10M %.9l %.6D %R' 2>/dev/null || sacct -j $job_id --format=JobID,JobName,State,ExitCode,Elapsed,MaxRSS"
+    else
+        echo -e "${BOLD}Your jobs:${RESET}"
+        ssh "$HPC_HOST" "squeue -u \$USER --format='%.18i %.9P %.30j %.8T %.10M %.9l %.6D %R'"
+    fi
+}
+
+# ============================================================================
+# hpc logs
+# ============================================================================
+cmd_logs() {
+    local job_id=""
+    local follow=false
+    local lines=50
+    local show_err=true
+    local show_out=true
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --help|-h)
+                cat << 'EOF'
+hpc logs - View job output
+
+USAGE:
+  hpc logs <job_id>           # View both stdout and stderr
+  hpc logs <job_id> -f        # Follow stdout (tail -f)
+  hpc logs <job_id> -n N      # Last N lines (default: 50)
+  hpc logs <job_id> --out     # Only stdout
+  hpc logs <job_id> --err     # Only stderr
+EOF
+                return 0
+                ;;
+            -f|--follow) follow=true; shift ;;
+            -n) lines="$2"; shift 2 ;;
+            --out) show_err=false; shift ;;
+            --err) show_out=false; shift ;;
+            -*) die "Unknown option: $1" ;;
+            *) job_id="$1"; shift ;;
+        esac
+    done
+
+    require_arg "job_id" "$job_id"
+
+    # Find stdout and stderr files from scontrol (only works for active jobs)
+    local stdout_file stderr_file
+    stdout_file=$(ssh "$HPC_HOST" "scontrol show job $job_id 2>/dev/null | grep -oP 'StdOut=\\K.*'" 2>/dev/null || true)
+    stderr_file=$(ssh "$HPC_HOST" "scontrol show job $job_id 2>/dev/null | grep -oP 'StdErr=\\K.*'" 2>/dev/null || true)
+
+    if [[ -z "$stdout_file" ]] && [[ -z "$stderr_file" ]]; then
+        die "Could not find log files for job $job_id (job may have completed - use 'hpc file cat /path/to/log')"
+    fi
+
+    # Follow mode only supports one file
+    if [[ "$follow" == "true" ]]; then
+        local target="$stdout_file"
+        [[ "$show_out" == "false" ]] && target="$stderr_file"
+        echo -e "${DIM}Following: $target${RESET}"
+        ssh "$HPC_HOST" "tail -f '$target'"
+        return
+    fi
+
+    # Show stdout
+    if [[ "$show_out" == "true" ]] && [[ -n "$stdout_file" ]]; then
+        echo -e "${BOLD}=== STDOUT ===${RESET} ${DIM}($stdout_file)${RESET}"
+        ssh "$HPC_HOST" "tail -n $lines '$stdout_file'" 2>/dev/null || echo "(empty or not found)"
+        echo ""
+    fi
+
+    # Show stderr
+    if [[ "$show_err" == "true" ]] && [[ -n "$stderr_file" ]]; then
+        echo -e "${BOLD}=== STDERR ===${RESET} ${DIM}($stderr_file)${RESET}"
+        ssh "$HPC_HOST" "tail -n $lines '$stderr_file'" 2>/dev/null || echo "(empty or not found)"
+    fi
+}
+
+# ============================================================================
+# hpc cancel
+# ============================================================================
+cmd_cancel() {
+    local job_id=""
+    local reason=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --help|-h)
+                cat << 'EOF'
+hpc cancel - Cancel a job
+
+USAGE:
+  hpc cancel <job_id>
+  hpc cancel <job_id> --reason "..."
+EOF
+                return 0
+                ;;
+            --reason) reason="$2"; shift 2 ;;
+            -*) die "Unknown option: $1" ;;
+            *) job_id="$1"; shift ;;
+        esac
+    done
+
+    require_arg "job_id" "$job_id"
+
+    # Check job state (handle array jobs - may have multiple states)
+    local states
+    states=$(ssh "$HPC_HOST" "squeue -j $job_id -h -o '%T'" 2>/dev/null | sort -u | tr '\n' ',' | sed 's/,$//' || echo "UNKNOWN")
+
+    echo -e "${BOLD}Job $job_id:${RESET} $states"
+
+    if echo "$states" | grep -q "RUNNING"; then
+        echo -e "${YELLOW}Warning: Job is RUNNING - work will be lost${RESET}"
+    fi
+
+    # Default reason if not provided (no interactive prompt in headless mode)
+    if [[ -z "$reason" ]]; then
+        reason="Cancelled via hpc toolkit"
+    fi
+
+    ssh "$HPC_HOST" "scancel $job_id"
+    echo -e "${GREEN}Cancelled job $job_id${RESET}"
+
+    log_audit "cancel" "\"job_id\":\"$job_id\",\"reason\":\"$reason\",\"states\":\"$states\""
+}
+
+# ============================================================================
+# hpc file
+# ============================================================================
+cmd_file() {
+    local subcmd="${1:-}"
+    shift 2>/dev/null || true
+
+    case "$subcmd" in
+        --help|-h|"")
+            cat << 'EOF'
+hpc file - File operations on HPC
+
+USAGE:
+  hpc file ls <path>            # List directory
+  hpc file cat <path>           # View file
+  hpc file head <path> [-n N]   # First N lines
+  hpc file tail <path> [-n N]   # Last N lines
+  hpc file rm <path>            # Delete (prompts confirmation)
+  hpc file cp <src> <dst>       # Copy
+  hpc file mv <src> <dst>       # Move
+  hpc file write <path>         # Write (reads from stdin or --content)
+  hpc file mkdir <path>         # Create directory
+
+All paths must be HPC paths (starting with /).
+EOF
+            return 0
+            ;;
+        ls)
+            local path="${1:-}"
+            require_arg "path" "$path"
+            ssh "$HPC_HOST" "ls -la '$path'"
+            ;;
+        cat)
+            local path="${1:-}"
+            require_arg "path" "$path"
+            ssh "$HPC_HOST" "cat '$path'"
+            ;;
+        head)
+            local path="" lines=10
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    -n) lines="$2"; shift 2 ;;
+                    -*) die "Unknown option: $1" ;;
+                    *) path="$1"; shift ;;
+                esac
+            done
+            require_arg "path" "$path"
+            ssh "$HPC_HOST" "head -n $lines '$path'"
+            ;;
+        tail)
+            local path="" lines=10
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    -n) lines="$2"; shift 2 ;;
+                    -*) die "Unknown option: $1" ;;
+                    *) path="$1"; shift ;;
+                esac
+            done
+            require_arg "path" "$path"
+            ssh "$HPC_HOST" "tail -n $lines '$path'"
+            ;;
+        rm)
+            local path="${1:-}"
+            require_arg "path" "$path"
+            # Check if exists
+            local exists
+            exists=$(ssh "$HPC_HOST" "test -e '$path' && echo 'yes' || echo 'no'" 2>/dev/null)
+            [[ "$exists" == "no" ]] && die "Path does not exist: $path"
+
+            echo -e "${YELLOW}Will delete:${RESET} $path"
+            read -p "Confirm deletion (y/N): " confirm
+            [[ "$confirm" != "y" && "$confirm" != "Y" ]] && { echo "Cancelled"; return 1; }
+
+            ssh "$HPC_HOST" "rm -rf '$path'"
+            echo -e "${GREEN}Deleted${RESET}"
+            log_audit "file_rm" "\"path\":\"$path\""
+            ;;
+        cp)
+            local src="${1:-}" dst="${2:-}"
+            require_arg "src" "$src"
+            require_arg "dst" "$dst"
+            ssh "$HPC_HOST" "cp -r '$src' '$dst'"
+            echo -e "${GREEN}Copied $src -> $dst${RESET}"
+            log_audit "file_cp" "\"src\":\"$src\",\"dst\":\"$dst\""
+            ;;
+        mv)
+            local src="${1:-}" dst="${2:-}"
+            require_arg "src" "$src"
+            require_arg "dst" "$dst"
+            # Check if dst exists
+            local dst_exists
+            dst_exists=$(ssh "$HPC_HOST" "test -e '$dst' && echo 'yes' || echo 'no'" 2>/dev/null)
+            if [[ "$dst_exists" == "yes" ]]; then
+                echo -e "${YELLOW}Destination exists:${RESET} $dst"
+                read -p "Overwrite? (y/N): " confirm
+                [[ "$confirm" != "y" && "$confirm" != "Y" ]] && { echo "Cancelled"; return 1; }
+            fi
+            ssh "$HPC_HOST" "mv '$src' '$dst'"
+            echo -e "${GREEN}Moved $src -> $dst${RESET}"
+            log_audit "file_mv" "\"src\":\"$src\",\"dst\":\"$dst\""
+            ;;
+        write)
+            local path="" content=""
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    --content) content="$2"; shift 2 ;;
+                    -*) die "Unknown option: $1" ;;
+                    *) path="$1"; shift ;;
+                esac
+            done
+            require_arg "path" "$path"
+
+            # Check if exists
+            local exists
+            exists=$(ssh "$HPC_HOST" "test -e '$path' && echo 'yes' || echo 'no'" 2>/dev/null)
+            if [[ "$exists" == "yes" ]]; then
+                echo -e "${YELLOW}File exists:${RESET} $path"
+                read -p "Overwrite? (y/N): " confirm
+                [[ "$confirm" != "y" && "$confirm" != "Y" ]] && { echo "Cancelled"; return 1; }
+            fi
+
+            # Ensure parent directory exists
+            ssh "$HPC_HOST" "mkdir -p '$(dirname "$path")'"
+
+            if [[ -n "$content" ]]; then
+                echo "$content" | ssh "$HPC_HOST" "cat > '$path'"
+            else
+                # Read from stdin
+                ssh "$HPC_HOST" "cat > '$path'"
+            fi
+
+            # Make executable if it looks like a script
+            if [[ "$path" == *.sh ]]; then
+                ssh "$HPC_HOST" "chmod +x '$path'"
+            fi
+
+            echo -e "${GREEN}Written: $path${RESET}"
+            log_audit "file_write" "\"path\":\"$path\""
+            ;;
+        mkdir)
+            local path="${1:-}"
+            require_arg "path" "$path"
+            ssh "$HPC_HOST" "mkdir -p '$path'"
+            echo -e "${GREEN}Created: $path${RESET}"
+            log_audit "file_mkdir" "\"path\":\"$path\""
+            ;;
+        *)
+            die "Unknown file subcommand: $subcmd"
+            ;;
+    esac
+}
+
+# ============================================================================
+# Repo Path Resolution
+# ============================================================================
+
+# CRSP mount prefix on macOS → HPC path mapping
+# These can be overridden in ~/.claude/hpc-toolkit/config.sh
+CRSP_MAC_PREFIX="${CRSP_MAC_PREFIX:-$HOME/Library/Application Support/CRSP Desktop/Volumes.noindex/CRSP Lab - dalawson.localized}"
+CRSP_HPC_PREFIX="${CRSP_HPC_PREFIX:-/share/crsp/lab/dalawson}"
+HARDCODED_REPO="${FALLBACK_REPO:-}"
+
+resolve_repo_path() {
+    local explicit_repo="${1:-}"
+
+    # 1. Explicit --repo override
+    if [[ -n "$explicit_repo" ]]; then
+        echo "$explicit_repo"
+        return 0
+    fi
+
+    # 2. CWD detection: if we're under CRSP mount, map to HPC path
+    local cwd
+    cwd=$(pwd)
+    if [[ -n "$CRSP_MAC_PREFIX" && "$cwd" == "$CRSP_MAC_PREFIX"* ]]; then
+        # Find git repo root locally
+        local local_root
+        local_root=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null) || true
+        if [[ -n "$local_root" ]]; then
+            # Strip macOS prefix, map to HPC
+            local relative="${local_root#$CRSP_MAC_PREFIX/}"
+            echo "${CRSP_HPC_PREFIX}/${relative}"
+            return 0
+        fi
+    fi
+
+    # 3. Fallback: configured default repo
+    if [[ -n "$HARDCODED_REPO" ]]; then
+        echo "$HARDCODED_REPO"
+    else
+        die "Cannot determine repo path. Use --repo or set FALLBACK_REPO in config.sh"
+    fi
+}
+
+# Derive mirror name from CRSP path. Appends short hash if basename collides.
+mirror_name_for() {
+    local crsp_path="$1"
+    local base
+    base=$(basename "$crsp_path")
+    # Check for collision: another workspace.conf with different crsp_path
+    local collision
+    collision=$(ssh "$HPC_HOST" "
+        conf=\"/pub/\$USER/git-mirrors/${base}.git/workspace.conf\"
+        if [ -f \"\$conf\" ]; then
+            stored=\$(grep '^crsp_path=' \"\$conf\" | cut -d= -f2-)
+            if [ \"\$stored\" != '$crsp_path' ]; then
+                echo 'collision'
+            else
+                echo 'match'
+            fi
+        else
+            echo 'available'
+        fi
+    " 2>/dev/null)
+
+    if [[ "$collision" == "collision" ]]; then
+        local hash
+        hash=$(echo -n "$crsp_path" | shasum | cut -c1-6)
+        echo "${base}-${hash}"
+    else
+        echo "$base"
+    fi
+}
+
+# ============================================================================
+# hpc workspace
+# ============================================================================
+cmd_workspace() {
+    local subcmd="${1:-}"
+    shift 2>/dev/null || true
+
+    case "$subcmd" in
+        --help|-h|"")
+            cat << 'EOF'
+hpc workspace - Manage fast git mirrors on DFS
+
+Keeps a bare git mirror on /pub/$USER/git-mirrors/ (fast DFS) while the
+working tree stays on CRSP. `hpc git` auto-detects workspaces.
+
+USAGE:
+  hpc workspace init <crsp-repo-path>   Create mirror from CRSP repo
+  hpc workspace list                    Show all workspaces
+  hpc workspace sync <name>             Push mirror → CRSP .git/
+  hpc workspace status <name>           Compare mirror vs CRSP
+  hpc workspace destroy <name>          Remove mirror
+EOF
+            return 0
+            ;;
+        init) workspace_init "$@" ;;
+        list) workspace_list "$@" ;;
+        sync) workspace_sync "$@" ;;
+        status) workspace_status "$@" ;;
+        destroy) workspace_destroy "$@" ;;
+        *) die "Unknown workspace subcommand: $subcmd. Run 'hpc workspace --help'." ;;
+    esac
+}
+
+workspace_init() {
+    local crsp_path="${1:-}"
+    require_arg "crsp-repo-path" "$crsp_path"
+    [[ "$crsp_path" != /* ]] && die "Path must be absolute (start with /)"
+
+    local name
+    name=$(mirror_name_for "$crsp_path")
+    local mirror_path="/pub/\$USER/git-mirrors/${name}.git"
+
+    echo -e "${BOLD}Initializing workspace${RESET}"
+    echo -e "  CRSP repo:  $crsp_path"
+    echo -e "  Mirror:     $mirror_path"
+    echo ""
+
+    # Validate and clone on HPC
+    # Why bare clone + aggressive gc? Because /pub hates many small files,
+    # and we're basically turning git into a weird database at this point
+    local output
+    output=$(ssh "$HPC_HOST" "
+        set -e
+
+        # Validate source
+        if [ ! -d '$crsp_path/.git' ]; then
+            echo 'ERROR: Not a git repo: $crsp_path'
+            exit 1
+        fi
+
+        MIRROR=\"/pub/\$USER/git-mirrors/${name}.git\"
+
+        # Check if already exists
+        if [ -d \"\$MIRROR\" ]; then
+            echo 'ERROR: Mirror already exists at '\"\$MIRROR\"
+            exit 1
+        fi
+
+        # Create parent
+        mkdir -p \"\$(dirname \"\$MIRROR\")\"
+
+        # Bare clone
+        git clone --bare '$crsp_path/.git' \"\$MIRROR\"
+
+        # Configure for /pub performance
+        cd \"\$MIRROR\"
+        git config gc.auto 50
+        git config gc.autoPackLimit 4
+        git config pack.compression 9
+        git config remote.origin.url '$crsp_path/.git'
+        git config remote.origin.fetch '+refs/heads/*:refs/heads/*'
+
+        # Write workspace config
+        cat > workspace.conf << WEOF
+crsp_path=$crsp_path
+created=\$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+WEOF
+
+        # Aggressive GC to pack objects
+        git gc --aggressive 2>&1
+
+        echo ''
+        echo 'DONE'
+        echo \"mirror=\$MIRROR\"
+        echo \"objects=\$(git count-objects -v | grep 'in-pack' | head -1)\"
+    " 2>&1) || true
+
+    echo "$output"
+
+    if echo "$output" | grep -q "^ERROR:"; then
+        return 1
+    fi
+
+    if echo "$output" | grep -q "^DONE"; then
+        echo ""
+        echo -e "${GREEN}Workspace '${name}' created${RESET}"
+        echo "  hpc git commands will now use the fast mirror automatically."
+        echo "  Use 'hpc workspace status ${name}' to check sync state."
+        log_audit "workspace_init" "\"name\":\"$name\",\"crsp_path\":\"$crsp_path\""
+    else
+        echo -e "${RED}Unexpected output from init${RESET}"
+        return 1
+    fi
+}
+
+workspace_list() {
+    echo -e "${BOLD}Git workspaces:${RESET}"
+    echo ""
+
+    local output
+    output=$(ssh "$HPC_HOST" "
+        base=\"/pub/\$USER/git-mirrors\"
+        if [ ! -d \"\$base\" ]; then
+            echo 'NO_WORKSPACES'
+            exit 0
+        fi
+
+        found=0
+        for conf in \"\$base\"/*.git/workspace.conf; do
+            [ -f \"\$conf\" ] || continue
+            found=1
+            mirror_dir=\"\$(dirname \"\$conf\")\"
+            name=\"\$(basename \"\$mirror_dir\" .git)\"
+            crsp_path=\"\$(grep '^crsp_path=' \"\$conf\" | cut -d= -f2-)\"
+            created=\"\$(grep '^created=' \"\$conf\" | cut -d= -f2-)\"
+
+            # Compare HEADs
+            mirror_head=\"\$(git -C \"\$mirror_dir\" rev-parse HEAD 2>/dev/null || echo 'none')\"
+            crsp_head=\"\$(git -C \"\$crsp_path\" rev-parse HEAD 2>/dev/null || echo 'none')\"
+
+            if [ \"\$mirror_head\" = \"\$crsp_head\" ]; then
+                sync='synced'
+            else
+                sync='DIVERGED'
+            fi
+
+            printf '%-25s %-8s %s\n' \"\$name\" \"\$sync\" \"\$crsp_path\"
+        done
+
+        if [ \"\$found\" -eq 0 ]; then
+            echo 'NO_WORKSPACES'
+        fi
+    " 2>/dev/null)
+
+    if [[ "$output" == "NO_WORKSPACES" ]]; then
+        echo "  (none)"
+        echo ""
+        echo "Create one with: hpc workspace init <crsp-repo-path>"
+    else
+        printf "${DIM}%-25s %-8s %s${RESET}\n" "NAME" "SYNC" "CRSP PATH"
+        echo "$output"
+    fi
+}
+
+workspace_sync() {
+    local name="${1:-}"
+    require_arg "name" "$name"
+
+    echo -e "${BOLD}Syncing workspace '${name}' → CRSP${RESET}"
+
+    local output
+    output=$(ssh "$HPC_HOST" "
+        set -e
+        MIRROR=\"/pub/\$USER/git-mirrors/${name}.git\"
+
+        if [ ! -f \"\$MIRROR/workspace.conf\" ]; then
+            echo 'ERROR: Workspace not found: ${name}'
+            exit 1
+        fi
+
+        crsp_path=\"\$(grep '^crsp_path=' \"\$MIRROR/workspace.conf\" | cut -d= -f2-)\"
+
+        # Check for CRSP index.lock
+        if [ -f \"\$crsp_path/.git/index.lock\" ]; then
+            echo 'WARNING: index.lock exists at CRSP — skipping sync'
+            exit 1
+        fi
+
+        # Check for divergence (CRSP has commits not in mirror)
+        crsp_head=\"\$(git -C \"\$crsp_path\" rev-parse HEAD 2>/dev/null || echo 'none')\"
+        mirror_has_crsp=\"\$(git -C \"\$MIRROR\" cat-file -t \"\$crsp_head\" 2>/dev/null || echo 'missing')\"
+        if [ \"\$mirror_has_crsp\" = 'missing' ] && [ \"\$crsp_head\" != 'none' ]; then
+            echo 'WARNING: CRSP has commits not in mirror (someone committed directly on CRSP)'
+            echo \"  CRSP HEAD: \$crsp_head\"
+            echo '  Syncing anyway (mirror is authoritative), but you may lose CRSP-only commits.'
+        fi
+
+        cd \"\$MIRROR\"
+
+        # Push all branches and tags
+        git push origin --all --force 2>&1
+        git push origin --tags --force 2>&1
+
+        # Auto GC
+        git gc --auto 2>&1
+
+        echo 'SYNC_OK'
+    " 2>&1) || true
+
+    echo "$output" | grep -v '^SYNC_OK$'
+
+    if echo "$output" | grep -q "^ERROR:"; then
+        return 1
+    fi
+
+    if echo "$output" | grep -q "SYNC_OK"; then
+        echo -e "${GREEN}Sync complete${RESET}"
+        log_audit "workspace_sync" "\"name\":\"$name\""
+    else
+        echo -e "${YELLOW}Sync may have issues — check output above${RESET}"
+    fi
+}
+
+workspace_status() {
+    local name="${1:-}"
+    require_arg "name" "$name"
+
+    ssh "$HPC_HOST" "
+        MIRROR=\"/pub/\$USER/git-mirrors/${name}.git\"
+
+        if [ ! -f \"\$MIRROR/workspace.conf\" ]; then
+            echo 'ERROR: Workspace not found: ${name}'
+            exit 1
+        fi
+
+        crsp_path=\"\$(grep '^crsp_path=' \"\$MIRROR/workspace.conf\" | cut -d= -f2-)\"
+        created=\"\$(grep '^created=' \"\$MIRROR/workspace.conf\" | cut -d= -f2-)\"
+
+        mirror_head=\"\$(git -C \"\$MIRROR\" rev-parse --short HEAD 2>/dev/null || echo 'none')\"
+        crsp_head=\"\$(git -C \"\$crsp_path\" rev-parse --short HEAD 2>/dev/null || echo 'none')\"
+
+        echo 'Workspace: ${name}'
+        echo \"CRSP path: \$crsp_path\"
+        echo \"Created:   \$created\"
+        echo \"Mirror:    \$MIRROR\"
+        echo ''
+        echo \"Mirror HEAD: \$mirror_head\"
+        echo \"CRSP HEAD:   \$crsp_head\"
+
+        if [ \"\$mirror_head\" = \"\$crsp_head\" ]; then
+            echo 'Status: SYNCED'
+        else
+            echo 'Status: DIVERGED'
+        fi
+
+        echo ''
+        git -C \"\$MIRROR\" count-objects -v 2>/dev/null | head -5
+
+        # Check if GC needed
+        loose=\"\$(git -C \"\$MIRROR\" count-objects | awk '{print \$1}')\"
+        if [ \"\$loose\" -gt 50 ]; then
+            echo ''
+            echo 'Note: gc recommended ('\$loose' loose objects)'
+        fi
+    " 2>/dev/null
+}
+
+workspace_destroy() {
+    local name="${1:-}"
+    require_arg "name" "$name"
+
+    echo -e "${YELLOW}This will permanently delete the mirror for '${name}'${RESET}"
+    echo "The CRSP repo is NOT affected."
+
+    local mirror_path
+    mirror_path=$(ssh "$HPC_HOST" "
+        MIRROR=\"/pub/\$USER/git-mirrors/${name}.git\"
+        if [ ! -f \"\$MIRROR/workspace.conf\" ]; then
+            echo 'NOT_FOUND'
+        else
+            echo \"\$MIRROR\"
+        fi
+    " 2>/dev/null)
+
+    if [[ "$mirror_path" == "NOT_FOUND" ]]; then
+        die "Workspace not found: ${name}"
+    fi
+
+    echo "  Will delete: $mirror_path"
+    read -p "Confirm (y/N): " confirm
+    [[ "$confirm" != "y" && "$confirm" != "Y" ]] && { echo "Cancelled"; return 1; }
+
+    ssh "$HPC_HOST" "rm -rf '$mirror_path'"
+    echo -e "${GREEN}Destroyed workspace '${name}'${RESET}"
+    log_audit "workspace_destroy" "\"name\":\"$name\""
+}
+
+# ============================================================================
+# hpc git
+# ============================================================================
+
+# Git write operations that trigger auto-sync
+# All git operations that modify index, refs, or working tree — triggers post-sync to CRSP
+GIT_WRITE_OPS="commit|add|merge|rebase|reset|checkout|switch|restore|cherry-pick|revert|stash|pull|fetch|rm|mv|tag|branch"
+
+# Subset that needs pre-fetch (mirror must match CRSP before executing).
+# These depend on correct HEAD/history — wrong parent SHA = wrong commit graph.
+#
+# NOT pre-fetched (index/worktree-only, no history dependency):
+#   add, rm, mv     — stage/unstage files, don't read history
+#   stash            — saves working state; stale parent is recoverable
+#   restore          — checks out from index/HEAD, not history-sensitive
+#   checkout/switch  — switches refs in mirror; mirror refs are authoritative
+#   tag, branch      — create refs at current HEAD; low risk, auto-sync corrects
+#   fetch            — IS a fetch; pre-fetching before fetch is redundant
+#   reset            — operates on index/HEAD; if HEAD is stale, result is
+#                      still consistent within the mirror
+#
+# Trade-off: a stale mirror means tag/branch point at mirror HEAD, not CRSP HEAD.
+# Acceptable because (1) these ops are rare via hpc git, (2) auto-sync pushes
+# the result to CRSP immediately, (3) workspace status detects divergence.
+GIT_PREFETCH_OPS="commit|merge|rebase|cherry-pick|pull|revert"
+
+cmd_git() {
+    # Parse --repo if present, before passing remaining args to git
+    local explicit_repo=""
+    local git_args=()
+
+    if [[ $# -eq 0 ]] || [[ "$1" == "--help" ]] || [[ "$1" == "-h" ]]; then
+        cat << 'EOF'
+hpc git - Run git commands on HPC login node
+
+USAGE:
+  hpc git <git_args...>
+  hpc git --repo /path/to/repo <git_args...>
+
+Runs git on the login node (no srun). Auto-detects workspace mirrors on DFS
+for faster I/O. Falls back to direct CRSP .git/ if no workspace exists.
+
+The repo is resolved by: 1) --repo flag, 2) macOS CWD mapping, 3) hardcoded default.
+
+EXAMPLES:
+  hpc git status
+  hpc git log --oneline -5
+  hpc git add project/config/manifest.yaml
+  hpc git commit -m "Update manifest"
+  hpc git diff --stat
+  hpc git --repo /share/crsp/.../OtherRepo status
+EOF
+        return 0
+    fi
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --repo) explicit_repo="$2"; shift 2 ;;
+            *) git_args+=("$1"); shift ;;
+        esac
+    done
+
+    # Resolve repo path
+    local repo_path
+    repo_path=$(resolve_repo_path "$explicit_repo")
+
+    # Check if workspace exists for this repo
+    # Intentionally vague joke: git is the only tool that makes you feel
+    # both powerful and confused at the same time, like a cat with a laser pointer
+    local repo_basename
+    repo_basename=$(basename "$repo_path")
+    local use_workspace=false
+    local workspace_name=""
+
+    local ws_check
+    ws_check=$(ssh "$HPC_HOST" "
+        for conf in /pub/\$USER/git-mirrors/*.git/workspace.conf; do
+            [ -f \"\$conf\" ] || continue
+            stored=\$(grep '^crsp_path=' \"\$conf\" | cut -d= -f2-)
+            if [ \"\$stored\" = '$repo_path' ]; then
+                basename \"\$(dirname \"\$conf\")\" .git
+                exit 0
+            fi
+        done
+        echo 'none'
+    " 2>/dev/null) || ws_check="none"
+
+    if [[ "$ws_check" != "none" ]] && [[ -n "$ws_check" ]]; then
+        use_workspace=true
+        workspace_name="$ws_check"
+    fi
+
+    # Build display and command
+    if [[ "$use_workspace" == "true" ]]; then
+        echo -e "${BOLD}Git (login node, workspace):${RESET} git ${git_args[*]}"
+        echo -e "${DIM}Mirror: /pub/\$USER/git-mirrors/${workspace_name}.git${RESET}"
+        echo -e "${DIM}Work tree: $repo_path${RESET}"
+    else
+        echo -e "${BOLD}Git (login node):${RESET} git ${git_args[*]}"
+        echo -e "${DIM}Repo: $repo_path${RESET}"
+    fi
+    echo ""
+
+    log_audit "git" "\"args\":\"${git_args[*]}\",\"workspace\":\"$workspace_name\""
+
+    # Shell-escape each arg to preserve quoting through SSH
+    local escaped_args=""
+    for arg in "${git_args[@]}"; do
+        escaped_args+=" $(printf '%q' "$arg")"
+    done
+
+    # Build git command with or without workspace
+    local git_prefix
+    if [[ "$use_workspace" == "true" ]]; then
+        git_prefix="GIT_DIR=\"/pub/\$USER/git-mirrors/${workspace_name}.git\" GIT_WORK_TREE='$repo_path'"
+
+        # Pre-fetch: pull any commits made directly on CRSP into mirror
+        # Only for history-dependent ops (see GIT_PREFETCH_OPS comment above)
+        local first_arg="${git_args[0]}"
+        if echo "$first_arg" | grep -qE "^($GIT_PREFETCH_OPS)$"; then
+            local fetch_output
+            fetch_output=$(ssh "$HPC_HOST" "
+                MIRROR=\"/pub/\$USER/git-mirrors/${workspace_name}.git\"
+                cd \"\$MIRROR\"
+                git fetch origin 2>&1
+            " 2>/dev/null) || true
+            if [[ -n "$fetch_output" ]]; then
+                echo -e "${DIM}Pre-fetch from CRSP: $fetch_output${RESET}"
+            fi
+        fi
+    else
+        git_prefix="cd '$repo_path' &&"
+    fi
+
+    # Execute
+    local output exit_code
+    output=$(ssh "$HPC_HOST" "$git_prefix git $escaped_args" 2>&1) && exit_code=0 || exit_code=$?
+    if [[ -n "$output" ]]; then
+        echo "$output"
+    fi
+    if [[ $exit_code -ne 0 ]]; then
+        echo -e "\n${RED}git exited with code $exit_code${RESET}" >&2
+        return $exit_code
+    fi
+
+    # Auto-sync after write operations
+    if [[ "$use_workspace" == "true" ]] && [[ $exit_code -eq 0 ]]; then
+        local first_arg="${git_args[0]}"
+        if echo "$first_arg" | grep -qE "^($GIT_WRITE_OPS)$"; then
+            echo ""
+            echo -e "${DIM}Auto-syncing to CRSP...${RESET}"
+            local sync_output
+            sync_output=$(ssh "$HPC_HOST" "
+                MIRROR=\"/pub/\$USER/git-mirrors/${workspace_name}.git\"
+                crsp_path='$repo_path'
+
+                # Skip if index.lock exists
+                if [ -f \"\$crsp_path/.git/index.lock\" ]; then
+                    echo 'WARNING: CRSP index.lock exists, skipping sync'
+                    exit 0
+                fi
+
+                cd \"\$MIRROR\"
+                git push origin --all --force 2>&1
+                git push origin --tags --force 2>&1
+                git gc --auto 2>&1
+                echo 'SYNC_OK'
+            " 2>&1) || true
+
+            if echo "$sync_output" | grep -q "SYNC_OK"; then
+                echo -e "${GREEN}Synced to CRSP${RESET}"
+            else
+                echo -e "${YELLOW}Sync warning: $sync_output${RESET}"
+                echo -e "${DIM}(Git command succeeded; work is safe in mirror)${RESET}"
+            fi
+        fi
+    fi
+
+    return $exit_code
+}
+
+# ============================================================================
+# Main Dispatch
+# ============================================================================
+[[ $# -eq 0 ]] && { show_help; exit 0; }
+
+COMMAND="$1"
+shift
+
+case "$COMMAND" in
+    submit) cmd_submit "$@" ;;
+    shell) cmd_shell "$@" ;;
+    status) cmd_status "$@" ;;
+    logs) cmd_logs "$@" ;;
+    cancel) cmd_cancel "$@" ;;
+    file) cmd_file "$@" ;;
+    git) cmd_git "$@" ;;
+    workspace) cmd_workspace "$@" ;;
+    --help|-h|help) show_help ;;
+    *) die "Unknown command: $COMMAND. Run 'hpc --help' for usage." ;;
+esac

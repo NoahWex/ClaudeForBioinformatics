@@ -1,0 +1,10 @@
+{
+  "name": "hpc-sandbox",
+  "version": "2.0.0",
+  "description": "HPC operations for UCI HPC3 with permission-based approval and chain validation",
+  "author": {
+    "name": "Noah Wechter"
+  },
+  "license": "MIT",
+  "keywords": ["hpc", "slurm", "ssh", "uci", "rcic", "sandbox"]
+}

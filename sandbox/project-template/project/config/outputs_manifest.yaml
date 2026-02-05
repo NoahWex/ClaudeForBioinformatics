@@ -1,0 +1,16 @@
+# Outputs Manifest
+# Registry of generated outputs
+
+version: "1.0"
+description: "Output registry for this project"
+
+# Track outputs as they're generated
+# Example:
+# outputs:
+#   processed_data:
+#     path: project/outputs/processed.h5ad
+#     description: "Processed single-cell data"
+#     generated_by: project/scripts/1_preprocess.py
+#     date: "2026-01-22"
+
+outputs: {}

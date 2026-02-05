@@ -1,0 +1,480 @@
+#!/bin/bash
+# hpc-submit - Form-based HPC job submission with mandatory documentation
+#
+# Forces explicit reasoning before every submission via required CLI arguments.
+# Arguments become auditable documentation of why each job was submitted.
+#
+# Usage:
+#   hpc-submit --script <path> --purpose "..." --outputs "..." [options]
+#   hpc-submit --inline --purpose "..." --outputs "..." [options] << 'EOF'
+
+set -euo pipefail
+
+HPC_HOST="hpc3"
+AUDIT_LOG="$HOME/.hpc-submit/audit.jsonl"
+TEMP_DIR="/tmp/hpc-submit"
+
+# ============================================================================
+# Argument Defaults
+# ============================================================================
+SCRIPT=""
+INLINE_MODE=false
+INLINE_CONTENT=""
+PURPOSE=""
+OUTPUTS=""
+RERUN_REASON=""
+DEPENDS_ON=""
+RISK_NOTE=""
+OVERWRITES=false
+TRIVIAL=false
+HYPOTHESIS=""
+DRY_RUN=false
+SBATCH_ARGS=()
+
+# ============================================================================
+# Colors (for terminal output)
+# ============================================================================
+BOLD='\033[1m'
+DIM='\033[2m'
+YELLOW='\033[33m'
+GREEN='\033[32m'
+RED='\033[31m'
+RESET='\033[0m'
+
+# ============================================================================
+# Help
+# ============================================================================
+show_help() {
+    cat << 'EOF'
+hpc-submit - Form-based HPC job submission
+
+Forces explicit documentation of every submission. Arguments become the audit trail.
+
+USAGE:
+  hpc-submit --script <path> --purpose "..." --outputs "..." [options]
+  hpc-submit --inline --purpose "..." --outputs "..." [options] << 'HEREDOC'
+
+REQUIRED:
+  --script PATH       SLURM script to submit (or use --inline)
+  --purpose "TEXT"    Why this job exists and why now (1-2 sentences)
+  --outputs "PATH"    Expected output files/directories
+
+CONDITIONAL (triggered by context):
+  --rerun-reason "TEXT"   Required if output files already exist
+  --risk-note "TEXT"      Required if memory >= 64GB or time >= 24h (unless --trivial)
+  --depends-on JOB_ID     Job ID this depends on (adds SLURM dependency)
+  --overwrites            Explicit flag to acknowledge overwriting outputs
+
+OPTIONAL:
+  --trivial           Skip risk-note requirement for quick/test jobs
+  --hypothesis "TEXT" For debug jobs: what you expect to learn
+  --dry-run           Show what would happen without submitting
+  --sbatch-arg "ARG"  Pass additional args to sbatch (repeatable)
+  --inline            Read script content from stdin (for heredocs)
+  -h, --help          Show this help
+
+EXAMPLES:
+
+  # Standard submission
+  hpc-submit \
+    --script /path/to/run/build_milo.sh \
+    --purpose "Build canonical Milo object for Gray study" \
+    --outputs "/path/to/outputs/gray_milo.rds"
+
+  # Re-run after fix (output exists)
+  hpc-submit \
+    --script run/build_milo.sh \
+    --purpose "Rebuild gray Milo after fixing cell ID parsing" \
+    --outputs "outputs/gray_milo.rds" \
+    --rerun-reason "Previous run failed: barcode format mismatch" \
+    --overwrites
+
+  # Heavy resources
+  hpc-submit \
+    --script run/integrate_scvi.sh \
+    --purpose "Full cohort scVI integration" \
+    --outputs "outputs/integrated.h5ad" \
+    --risk-note "258K cells requires 128GB; tested on subset first"
+
+  # Chained job
+  hpc-submit \
+    --script run/run_da.sh \
+    --purpose "Run DA analysis on gray Milo" \
+    --outputs "outputs/gray_da.rds" \
+    --depends-on 12345678
+
+  # Quick test (escape hatch)
+  hpc-submit \
+    --script run/test.sh \
+    --purpose "Verify SLURM connectivity" \
+    --outputs "/dev/null" \
+    --trivial
+
+  # Inline heredoc
+  hpc-submit --inline \
+    --purpose "Quick dimension check" \
+    --outputs "stdout" \
+    --trivial << 'EOF'
+  #!/bin/bash
+  #SBATCH --job-name=dim_check
+  #SBATCH --time=00:05:00
+  #SBATCH --mem=4G
+  Rscript -e 'print(dim(readRDS("data.rds")))'
+  EOF
+
+EOF
+    exit 0
+}
+
+# ============================================================================
+# Argument Parsing
+# ============================================================================
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --help|-h)
+            show_help
+            ;;
+        --script)
+            SCRIPT="$2"
+            shift 2
+            ;;
+        --inline)
+            INLINE_MODE=true
+            shift
+            ;;
+        --purpose)
+            PURPOSE="$2"
+            shift 2
+            ;;
+        --outputs)
+            OUTPUTS="$2"
+            shift 2
+            ;;
+        --rerun-reason)
+            RERUN_REASON="$2"
+            shift 2
+            ;;
+        --depends-on)
+            DEPENDS_ON="$2"
+            shift 2
+            ;;
+        --risk-note)
+            RISK_NOTE="$2"
+            shift 2
+            ;;
+        --overwrites)
+            OVERWRITES=true
+            shift
+            ;;
+        --trivial)
+            TRIVIAL=true
+            shift
+            ;;
+        --hypothesis)
+            HYPOTHESIS="$2"
+            shift 2
+            ;;
+        --dry-run)
+            DRY_RUN=true
+            shift
+            ;;
+        --sbatch-arg)
+            SBATCH_ARGS+=("$2")
+            shift 2
+            ;;
+        -*)
+            echo -e "${RED}ERROR: Unknown option: $1${RESET}"
+            echo "Run 'hpc-submit --help' for usage"
+            exit 1
+            ;;
+        *)
+            # Positional arg - treat as script if not set
+            if [[ -z "$SCRIPT" ]]; then
+                SCRIPT="$1"
+            fi
+            shift
+            ;;
+    esac
+done
+
+# ============================================================================
+# Handle Inline Mode
+# ============================================================================
+if [[ "$INLINE_MODE" == "true" ]]; then
+    INLINE_CONTENT=$(cat)
+
+    if [[ -z "$INLINE_CONTENT" ]]; then
+        echo -e "${RED}ERROR: --inline specified but no content provided via stdin${RESET}"
+        echo ""
+        echo "Usage: hpc-submit --inline [options] << 'EOF'"
+        echo "  #!/bin/bash"
+        echo "  #SBATCH ..."
+        echo "  your commands"
+        echo "EOF"
+        exit 1
+    fi
+
+    # Create temp directory on HPC
+    ssh "$HPC_HOST" "mkdir -p $TEMP_DIR" 2>/dev/null
+
+    # Hash content for unique filename
+    if command -v md5 &>/dev/null; then
+        HASH=$(echo "$INLINE_CONTENT" | md5 | cut -c1-12)
+    else
+        HASH=$(echo "$INLINE_CONTENT" | md5sum | cut -c1-12)
+    fi
+
+    SCRIPT="$TEMP_DIR/inline_${HASH}.sh"
+
+    # Write content to HPC
+    echo "$INLINE_CONTENT" | ssh "$HPC_HOST" "cat > '$SCRIPT' && chmod +x '$SCRIPT'"
+
+    echo -e "${DIM}Inline content saved to: $SCRIPT${RESET}"
+fi
+
+# ============================================================================
+# Validation
+# ============================================================================
+ERRORS=()
+
+# Required fields
+[[ -z "$SCRIPT" && "$INLINE_MODE" == "false" ]] && ERRORS+=("--script is required (or use --inline)")
+[[ -z "$PURPOSE" ]] && ERRORS+=("--purpose is required")
+[[ -z "$OUTPUTS" ]] && ERRORS+=("--outputs is required")
+
+# Script exists on HPC (skip for inline - we just created it)
+if [[ -n "$SCRIPT" && "$INLINE_MODE" == "false" ]]; then
+    SCRIPT_CHECK=$(ssh "$HPC_HOST" "test -f '$SCRIPT' && echo 'exists' || echo 'missing'" 2>/dev/null)
+    if [[ "$SCRIPT_CHECK" == "missing" ]]; then
+        ERRORS+=("Script not found on HPC: $SCRIPT")
+    fi
+fi
+
+# Exit early if basic validation fails
+if [[ ${#ERRORS[@]} -gt 0 ]]; then
+    echo -e "${RED}VALIDATION FAILED:${RESET}"
+    for err in "${ERRORS[@]}"; do
+        echo "  - $err"
+    done
+    exit 1
+fi
+
+# ============================================================================
+# Fetch and Parse Script Content
+# ============================================================================
+if [[ "$INLINE_MODE" == "true" ]]; then
+    SCRIPT_CONTENT="$INLINE_CONTENT"
+else
+    SCRIPT_CONTENT=$(ssh "$HPC_HOST" "cat '$SCRIPT'" 2>/dev/null)
+fi
+
+# Extract SBATCH directives (use || true to handle grep returning 1 for no match)
+get_sbatch() {
+    local flag="$1"
+    local result
+    result=$(echo "$SCRIPT_CONTENT" | grep -E "^#SBATCH.*$flag" 2>/dev/null | sed -E "s/.*$flag[= ]*//" | head -1 || true)
+    echo "$result"
+}
+
+JOBNAME=$(get_sbatch "--job-name")
+ACCOUNT=$(get_sbatch "--account")
+PARTITION=$(get_sbatch "--partition")
+TIME=$(get_sbatch "--time")
+MEM=$(get_sbatch "--mem")
+CPUS=$(get_sbatch "--cpus-per-task")
+OUTPUT_LOG=$(get_sbatch "--output")
+
+# ============================================================================
+# Conditional Validation
+# ============================================================================
+
+# Check if outputs already exist on HPC
+OUTPUTS_EXIST=false
+if [[ "$OUTPUTS" != "/dev/null" && "$OUTPUTS" != "stdout" ]]; then
+    # Check first output path (handle comma-separated)
+    FIRST_OUTPUT=$(echo "$OUTPUTS" | cut -d',' -f1 | xargs)
+    OUTPUT_CHECK=$(ssh "$HPC_HOST" "test -e '$FIRST_OUTPUT' && echo 'exists' || echo 'missing'" 2>/dev/null)
+    if [[ "$OUTPUT_CHECK" == "exists" ]]; then
+        OUTPUTS_EXIST=true
+    fi
+fi
+
+# Require --rerun-reason if outputs exist (unless --overwrites explicitly set)
+if [[ "$OUTPUTS_EXIST" == "true" && -z "$RERUN_REASON" && "$OVERWRITES" == "false" ]]; then
+    ERRORS+=("Output already exists: $FIRST_OUTPUT")
+    ERRORS+=("  Use --rerun-reason \"why re-running\" and --overwrites to proceed")
+fi
+
+# Check resource thresholds for --risk-note requirement
+HEAVY_RESOURCES=false
+if [[ -n "$MEM" ]]; then
+    MEM_GB=$(echo "$MEM" | sed 's/[gG]//' | sed 's/[mM]/\/1024/' | bc 2>/dev/null || echo "0")
+    [[ "$MEM_GB" -ge 64 ]] && HEAVY_RESOURCES=true
+fi
+if [[ -n "$TIME" ]]; then
+    # Parse time (HH:MM:SS or D-HH:MM:SS) - use 10# to force base-10 (avoid octal)
+    if [[ "$TIME" =~ ^([0-9]+)-([0-9]+):([0-9]+):([0-9]+)$ ]]; then
+        HOURS=$((10#${BASH_REMATCH[1]} * 24 + 10#${BASH_REMATCH[2]}))
+    elif [[ "$TIME" =~ ^([0-9]+):([0-9]+):([0-9]+)$ ]]; then
+        HOURS=$((10#${BASH_REMATCH[1]}))
+    else
+        HOURS=0
+    fi
+    [[ "$HOURS" -ge 24 ]] && HEAVY_RESOURCES=true
+fi
+
+# Require --risk-note for heavy resources (unless --trivial)
+if [[ "$HEAVY_RESOURCES" == "true" && -z "$RISK_NOTE" && "$TRIVIAL" == "false" ]]; then
+    ERRORS+=("Heavy resources detected (mem >= 64GB or time >= 24h)")
+    ERRORS+=("  Use --risk-note \"justification\" or --trivial to proceed")
+fi
+
+# Validate --depends-on job exists
+if [[ -n "$DEPENDS_ON" ]]; then
+    JOB_CHECK=$(ssh "$HPC_HOST" "squeue -j $DEPENDS_ON -h 2>/dev/null | wc -l" 2>/dev/null || echo "0")
+    COMPLETED_CHECK=$(ssh "$HPC_HOST" "sacct -j $DEPENDS_ON -n 2>/dev/null | wc -l" 2>/dev/null || echo "0")
+    if [[ "$JOB_CHECK" -eq 0 && "$COMPLETED_CHECK" -eq 0 ]]; then
+        ERRORS+=("Dependency job not found: $DEPENDS_ON")
+    fi
+fi
+
+# Exit if validation fails
+if [[ ${#ERRORS[@]} -gt 0 ]]; then
+    echo -e "${RED}VALIDATION FAILED:${RESET}"
+    for err in "${ERRORS[@]}"; do
+        echo "  $err"
+    done
+    exit 1
+fi
+
+# ============================================================================
+# Display Submission Review
+# ============================================================================
+echo ""
+echo -e "${BOLD}┌─────────────────────────────────────────────────────────────┐${RESET}"
+echo -e "${BOLD}│                    HPC SUBMISSION                           │${RESET}"
+echo -e "${BOLD}├─────────────────────────────────────────────────────────────┤${RESET}"
+printf "${BOLD}│${RESET} %-59s ${BOLD}│${RESET}\n" "Purpose: $PURPOSE"
+if [[ "$INLINE_MODE" == "true" ]]; then
+    printf "${BOLD}│${RESET} %-59s ${BOLD}│${RESET}\n" "Script:  (inline)"
+else
+    printf "${BOLD}│${RESET} %-59s ${BOLD}│${RESET}\n" "Script:  $SCRIPT"
+fi
+printf "${BOLD}│${RESET} %-59s ${BOLD}│${RESET}\n" "Outputs: $OUTPUTS"
+
+if [[ -n "$HYPOTHESIS" ]]; then
+    printf "${BOLD}│${RESET} %-59s ${BOLD}│${RESET}\n" "Hypothesis: $HYPOTHESIS"
+fi
+
+# Show inline script content (full, outside the box)
+if [[ "$INLINE_MODE" == "true" ]]; then
+    echo -e "${BOLD}├─────────────────────────────────────────────────────────────┤${RESET}"
+    printf "${BOLD}│${RESET} %-59s ${BOLD}│${RESET}\n" "Script content: (see below)"
+fi
+
+echo -e "${BOLD}├─────────────────────────────────────────────────────────────┤${RESET}"
+
+# Resources
+RESOURCES_LINE=""
+[[ -n "$MEM" ]] && RESOURCES_LINE+="$MEM mem"
+[[ -n "$CPUS" ]] && RESOURCES_LINE+=", ${CPUS} CPUs"
+[[ -n "$TIME" ]] && RESOURCES_LINE+=", $TIME"
+[[ -z "$RESOURCES_LINE" ]] && RESOURCES_LINE="(using cluster defaults)"
+
+printf "${BOLD}│${RESET} %-59s ${BOLD}│${RESET}\n" "Resources: $RESOURCES_LINE"
+[[ -n "$ACCOUNT" ]] && printf "${BOLD}│${RESET} %-59s ${BOLD}│${RESET}\n" "Account:   $ACCOUNT"
+[[ -n "$PARTITION" ]] && printf "${BOLD}│${RESET} %-59s ${BOLD}│${RESET}\n" "Partition: $PARTITION"
+
+# Warnings/notes
+if [[ "$OUTPUTS_EXIST" == "true" ]]; then
+    echo -e "${BOLD}├─────────────────────────────────────────────────────────────┤${RESET}"
+    printf "${BOLD}│${RESET} ${YELLOW}%-58s${RESET} ${BOLD}│${RESET}\n" "! Output exists - will overwrite"
+    printf "${BOLD}│${RESET} %-59s ${BOLD}│${RESET}\n" "  Reason: $RERUN_REASON"
+fi
+
+if [[ -n "$RISK_NOTE" ]]; then
+    echo -e "${BOLD}├─────────────────────────────────────────────────────────────┤${RESET}"
+    printf "${BOLD}│${RESET} %-59s ${BOLD}│${RESET}\n" "Risk note: $RISK_NOTE"
+fi
+
+if [[ -n "$DEPENDS_ON" ]]; then
+    echo -e "${BOLD}├─────────────────────────────────────────────────────────────┤${RESET}"
+    printf "${BOLD}│${RESET} %-59s ${BOLD}│${RESET}\n" "Depends on: Job $DEPENDS_ON"
+fi
+
+if [[ "$TRIVIAL" == "true" ]]; then
+    echo -e "${BOLD}├─────────────────────────────────────────────────────────────┤${RESET}"
+    printf "${BOLD}│${RESET} ${DIM}%-59s${RESET} ${BOLD}│${RESET}\n" "(trivial job - risk assessment skipped)"
+fi
+
+echo -e "${BOLD}└─────────────────────────────────────────────────────────────┘${RESET}"
+
+# Show full inline script content after the box
+if [[ "$INLINE_MODE" == "true" ]]; then
+    echo ""
+    echo -e "${DIM}--- Script Content ---${RESET}"
+    echo "$SCRIPT_CONTENT" | while IFS= read -r line; do
+        echo -e "${DIM}  $line${RESET}"
+    done
+    echo -e "${DIM}----------------------${RESET}"
+fi
+
+echo ""
+
+# ============================================================================
+# Dry Run Exit
+# ============================================================================
+if [[ "$DRY_RUN" == "true" ]]; then
+    echo -e "${YELLOW}[DRY RUN]${RESET} Would execute:"
+    SBATCH_CMD="sbatch"
+    [[ -n "$DEPENDS_ON" ]] && SBATCH_CMD+=" --dependency=afterok:$DEPENDS_ON"
+    [[ ${#SBATCH_ARGS[@]} -gt 0 ]] && SBATCH_CMD+=" ${SBATCH_ARGS[*]}"
+    SBATCH_CMD+=" $SCRIPT"
+    echo "  ssh $HPC_HOST \"$SBATCH_CMD\""
+    exit 0
+fi
+
+# ============================================================================
+# Submit Job
+# ============================================================================
+SBATCH_CMD="sbatch --parsable"
+[[ -n "$DEPENDS_ON" ]] && SBATCH_CMD+=" --dependency=afterok:$DEPENDS_ON"
+[[ ${#SBATCH_ARGS[@]} -gt 0 ]] && SBATCH_CMD+=" ${SBATCH_ARGS[*]}"
+SBATCH_CMD+=" '$SCRIPT'"
+
+JOB_ID=$(ssh "$HPC_HOST" "$SBATCH_CMD" 2>&1)
+
+if [[ ! "$JOB_ID" =~ ^[0-9]+$ ]]; then
+    echo -e "${RED}SUBMISSION FAILED:${RESET}"
+    echo "$JOB_ID"
+    exit 1
+fi
+
+echo -e "${GREEN}Submitted job $JOB_ID${RESET}"
+echo ""
+
+# ============================================================================
+# Write Audit Log
+# ============================================================================
+mkdir -p "$(dirname "$AUDIT_LOG")"
+
+TIMESTAMP=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+
+# Build JSON record
+cat >> "$AUDIT_LOG" << EOF
+{"timestamp":"$TIMESTAMP","job_id":"$JOB_ID","script":"$SCRIPT","purpose":"$PURPOSE","outputs":"$OUTPUTS","resources":{"mem":"${MEM:-}","cpus":"${CPUS:-}","time":"${TIME:-}"},"rerun_reason":"${RERUN_REASON:-}","risk_note":"${RISK_NOTE:-}","depends_on":"${DEPENDS_ON:-}","trivial":$TRIVIAL,"inline":$INLINE_MODE}
+EOF
+
+# ============================================================================
+# Monitoring Commands
+# ============================================================================
+echo "Monitor:"
+echo "  ssh $HPC_HOST \"squeue -j $JOB_ID\""
+
+if [[ -n "$OUTPUT_LOG" ]]; then
+    # Substitute %j with job ID in log path
+    LOG_PATH=$(echo "$OUTPUT_LOG" | sed "s/%j/$JOB_ID/g" | sed "s/%x/${JOBNAME:-job}/g")
+    echo "  ssh $HPC_HOST \"tail -f $LOG_PATH\""
+else
+    echo "  # Check job's working directory for slurm-$JOB_ID.out"
+fi

@@ -1,0 +1,57 @@
+# UCI HPC3 Profile
+# Default settings for UCI RCIC HPC3 cluster
+
+name: uci-hpc3
+description: UCI Research Cyberinfrastructure Center HPC3 cluster
+
+cluster:
+  hostname: hpc3.rcic.uci.edu
+  ssh_alias: hpc3
+  partition: standard
+  partitions_available:
+    - standard      # Main partition
+    - free          # Preemptible, no allocation charge
+    - free-gpu      # GPU jobs, preemptible
+    - highmem       # High memory nodes
+  default_account: ""  # Set in sandbox.yaml
+
+authentication:
+  method: ssh_key + duo
+  duo_required: true
+  control_persist: 24h
+  notes: "First connection triggers DUO push; socket persists for 24h"
+
+paths:
+  crsp_base: /share/crsp/lab
+  dfs7: /dfs7
+  dfs8: /dfs8
+  containers: /dfs7/singularity_containers
+  home: /data/homezvol0
+
+storage:
+  crsp:
+    description: "CRSP - Campus Research Storage Pool"
+    mount: /share/crsp/lab/{lab_name}
+    quota_default: "1TB"
+    backup: true
+  dfs:
+    description: "DFS - High-performance scratch"
+    mount: /dfs7, /dfs8
+    quota_default: "none"
+    backup: false
+
+modules:
+  singularity: singularity/3.11.3
+  python: python/3.10.2
+  r: R/4.3.3
+
+container_paths:
+  r_spatial: /dfs7/singularity_containers/rcic/JHUB3/Rocky8_jupyter_base_R4.3.3_Spatial.sif
+  python_giotto: /dfs8/singularity_containers/rcic/devel/Jupyter_R_4.4.2_Giotto_Spatial_Python_2025Q2.sif
+
+documentation:
+  getting_started: https://rcic.uci.edu/hpc3/getting-started.html
+  slurm: https://rcic.uci.edu/slurm/
+  storage: https://rcic.uci.edu/storage/crsp.html
+  containers: https://rcic.uci.edu/singularity/
+  account_request: https://rcic.uci.edu/account.html

@@ -1,0 +1,125 @@
+# Cell Type Reference for Gray et al. Dataset
+#
+# Documents the cell types present in the workshop dataset with
+# marker genes and descriptions for biological context.
+#
+# Reference: Gray et al. 2022, Cell Genomics
+# Part of iHBCA: Reed et al. 2024, Nature Genetics
+
+# ==============================================================================
+# Cell Types in Gray Dataset (cell_type column)
+# ==============================================================================
+
+cell_types:
+  basal_cell:
+    label: "basal cell"
+    count: ~8000  # Approximate
+    markers: [KRT5, KRT14, TP63, KRT17]
+    description: |
+      Basal/myoepithelial cells that form the outer layer of breast ducts.
+      These cells have contractile properties and produce the basement membrane.
+    subtypes_in_data: [BL]  # From cellSubtype column
+
+  fibroblast:
+    label: "fibroblast"
+    count: ~12000
+    markers: [COL1A1, COL1A2, DCN, LUM, VIM]
+    description: |
+      Stromal cells that produce extracellular matrix and provide structural support.
+      Multiple subtypes present (F1, F2, F3 in cellSubtype).
+    subtypes_in_data: [F1, F2, F3]
+
+  lactocyte:
+    label: "lactocyte"
+    count: ~8000
+    markers: [CSN2, LALBA, LTF, PIGR]
+    description: |
+      Secretory luminal epithelial cells specialized for milk production.
+      Also called alveolar or secretory luminal cells.
+    subtypes_in_data: [HSa, HSb]  # Hormone-sensing subtypes
+
+  leukocyte:
+    label: "leukocyte"
+    count: ~5000
+    markers: [PTPRC, CD3D, CD68, CD79A]
+    description: |
+      Mixed immune cell population including T cells, macrophages, and B cells.
+      Tissue-resident immune surveillance.
+    subtypes_in_data: [T, M, B]  # T cells, Macrophages, B cells
+
+  progenitor_luminal:
+    label: "progenitor cell of mammary luminal epithelium"
+    count: ~15000
+    markers: [KIT, ALDH1A3, ELF5, KRT8]
+    description: |
+      Luminal progenitor cells with stem-like properties.
+      Important for mammary gland development and regeneration.
+    subtypes_in_data: [AP, PE]  # Alveolar progenitor, other progenitors
+
+  vascular_lymphangioblast:
+    label: "vascular lymphangioblast"
+    count: ~5000
+    markers: [PECAM1, VWF, PROX1, FLT4]
+    description: |
+      Endothelial cells of blood vessels and lymphatics.
+      Includes both vascular and lymphatic endothelium.
+    subtypes_in_data: [VE]  # Vascular endothelium
+
+# ==============================================================================
+# Subtypes (cellSubtype column) - 19 unique values
+# ==============================================================================
+
+subtypes:
+  # Epithelial
+  BL: {parent: basal_cell, description: "Basal/myoepithelial"}
+  HSa: {parent: lactocyte, description: "Hormone-sensing type a"}
+  HSb: {parent: lactocyte, description: "Hormone-sensing type b"}
+  AP: {parent: progenitor_luminal, description: "Alveolar progenitor"}
+  PE: {parent: progenitor_luminal, description: "Progenitor/epithelial"}
+
+  # Stromal
+  F1: {parent: fibroblast, description: "Fibroblast subtype 1"}
+  F2: {parent: fibroblast, description: "Fibroblast subtype 2"}
+  F3: {parent: fibroblast, description: "Fibroblast subtype 3"}
+
+  # Immune
+  T: {parent: leukocyte, description: "T lymphocytes"}
+  M: {parent: leukocyte, description: "Macrophages/myeloid"}
+  B: {parent: leukocyte, description: "B lymphocytes"}
+
+  # Endothelial
+  VE: {parent: vascular_lymphangioblast, description: "Vascular endothelium"}
+
+  # Other
+  doublet: {parent: null, description: "Potential doublets (low quality)"}
+
+# ==============================================================================
+# Clinical Variables
+# ==============================================================================
+
+genotypes:
+  - WT: "Wild type (no BRCA mutation)"
+  - BRCA1: "BRCA1 mutation carrier"
+  - BRCA2: "BRCA2 mutation carrier"
+  - RAD51C: "RAD51C mutation carrier"
+
+clinical_metadata:
+  surgeryType: "Type of surgery (prophylactic, therapeutic)"
+  menopause: "Menopausal status"
+  numberOfPregnancies: "Number of pregnancies"
+  numberOfBirths: "Number of live births"
+
+# ==============================================================================
+# Usage in Analysis
+# ==============================================================================
+#
+# To use these cell types in R:
+#
+# # Get all cells of a type
+# basal_cells <- subset(seurat_obj, cell_type == "basal cell")
+#
+# # Get subtypes
+# fibroblast_subtypes <- subset(seurat_obj, cellSubtype %in% c("F1", "F2", "F3"))
+#
+# # Compare genotypes
+# table(seurat_obj$cell_type, seurat_obj$genotype_1)

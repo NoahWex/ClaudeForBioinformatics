@@ -1,0 +1,42 @@
+# Project Manifest
+# Configuration for breast tissue scRNA-seq analysis
+
+# ==============================================================================
+# Project Metadata
+# ==============================================================================
+project:
+  name: breast_tissue_analysis
+  author: # TODO: Your name
+  date_created: 2026-02-03
+  description: Analysis of Gray et al. breast tissue scRNA-seq data
+
+# ==============================================================================
+# Data Source
+# ==============================================================================
+data:
+  base_path: /share/crsp/lab/dalawson/share/3_Downloaded_Datasets/iHBCA_Reed_2024/component_studies
+
+  gray:
+    file: gray.rds
+    description: Gray et al. breast tissue scRNA-seq
+    cells: 52681
+    donors: 16
+    # Metadata columns (to be filled after exploration)
+    cell_type_column: cell_type
+    sample_column: donor_id
+
+# ==============================================================================
+# QC Parameters
+# ==============================================================================
+qc:
+  min_genes: 200        # Minimum genes per cell
+  max_genes: 5000       # Maximum genes per cell (doublet filter)
+  max_mito_pct: 20      # Maximum mitochondrial percentage
+
+# ==============================================================================
+# Output Directories
+# ==============================================================================
+outputs:
+  processed: outputs/processed
+  figures: figures
+  reports: reports

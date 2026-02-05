@@ -1,0 +1,29 @@
+{
+  "description": "HPC Sandbox hooks - security gate + logging for HPC commands",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/plugins/hpc-sandbox/hooks/validate-hpc-command.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/plugins/hpc-sandbox/hooks/hpc-logger.py",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

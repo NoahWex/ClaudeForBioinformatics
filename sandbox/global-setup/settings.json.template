@@ -1,0 +1,32 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(~/.claude/hpc-toolkit/bin/hpc *)",
+      "Bash(ssh SSH_ALIAS *)"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cat ~/.claude/rules/trace-framework.md 2>/dev/null || true"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hpc-toolkit/hooks/gate.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

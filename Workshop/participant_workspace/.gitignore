@@ -1,0 +1,43 @@
+# Participant Workspace .gitignore
+
+# Data files (too large for git)
+*.rds
+*.RData
+*.h5
+*.h5ad
+*.h5seurat
+
+# Output directories
+outputs/
+reports/*.html
+reports/*.pdf
+
+# R session files
+.Rproj.user/
+.Rhistory
+.RData
+.Ruserdata
+*.Rproj
+
+# Python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+*~
+
+# Log files
+*.log
+slurm-*.out
+
+# Keep directory structure
+!outputs/.gitkeep
+!reports/.gitkeep
+!scripts/.gitkeep

@@ -1,0 +1,19 @@
+#!/bin/bash
+# Graph Memory CLI - Global Installation Wrapper
+#
+# This wrapper points to the shared tools in the package.
+# Copy this to ~/.claude/graph-memory/plan for global installation.
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# For global install, tools should be at ~/.claude/graph-memory/tools
+# This wrapper is designed for the sandbox global-setup demonstration
+TOOLS_DIR="$SCRIPT_DIR/../../../graph-memory/tools"
+
+if [[ ! -d "$TOOLS_DIR" ]]; then
+    echo "Error: Cannot find graph-memory tools" >&2
+    echo "Expected: $TOOLS_DIR" >&2
+    exit 1
+fi
+
+exec python3 "$TOOLS_DIR/cli.py" "$@"

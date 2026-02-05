@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Graph Memory auto-generated files
+.index.json
+.index.yaml
+
+# macOS
+.DS_Store
+._*
+.AppleDouble
+.LSOverride
+
+# Editor
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+*.sublime-*
+
+# Logs
+*.log
+logs/
+
+# Environment
+.env
+.venv/
+env/
+venv/
+
+# Temporary files
+*.tmp
+*.temp
+/tmp/
+
+# Workshop participant data (if any)
+Workshop/participant_workspace/outputs/
+Workshop/working/outputs/
+
+# Sandbox user configs (template should be committed, not user edits)
+sandbox/config/sandbox.yaml

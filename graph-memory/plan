@@ -1,0 +1,32 @@
+#!/bin/bash
+# Graph Memory CLI - Plan and Knowledge Base Management
+#
+# Installation modes:
+#   Project-embedded: Copy graph-memory/ into your project
+#   Global install:   Copy to ~/.claude/graph-memory/
+#
+# Environment variables:
+#   PLAN_DIR      - Override plans directory location
+#   KNOWLEDGE_DIR - Override knowledge directory location
+
+# Resolve script location (handles symlinks)
+SOURCE="${BASH_SOURCE[0]}"
+while [ -h "$SOURCE" ]; do
+  DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
+
+# Determine tools location
+if [[ -d "$SCRIPT_DIR/tools" ]]; then
+    TOOLS_DIR="$SCRIPT_DIR/tools"
+elif [[ -d "$HOME/.claude/graph-memory/tools" ]]; then
+    TOOLS_DIR="$HOME/.claude/graph-memory/tools"
+else
+    echo "Error: Cannot find graph-memory tools directory" >&2
+    echo "Expected: $SCRIPT_DIR/tools or ~/.claude/graph-memory/tools" >&2
+    exit 1
+fi
+
+exec python3 "$TOOLS_DIR/cli.py" "$@"
