@@ -7,7 +7,9 @@ supersedes: null              # Previous plan ID if this replaces another
 blocked_by: []                # Plan IDs that must complete first
 blocks: []                    # Plan IDs waiting on this
 status: queued                # queued | in_progress | blocked | complete
+draft_path: <THIS_FILE_PATH>  # Absolute path to this draft file (set by agent)
 jobs: []                      # Optional: SLURM job IDs if applicable
+sequence: null                # Optional: sequence this plan belongs to
 ---
 
 # Plan Title

@@ -166,6 +166,34 @@ Claude Code features used:
 - **Configurable**: Added `config.sh.template` so lab members only edit one file for their environment
 - **GETTING_STARTED**: Added global setup section distinguishing project-level vs user-level config
 
+## References
+
+### Claude Code
+
+- [Claude Code Documentation](https://docs.anthropic.com/en/docs/claude-code) — Official docs
+- [Claude Code GitHub](https://github.com/anthropics/claude-code) — Issues, releases, discussions
+- [Claude Code Changelog](https://docs.anthropic.com/en/docs/claude-code/changelog) — Version history
+
+### UCI HPC (RCIC)
+
+- [HPC3 User Guide](https://rcic.uci.edu/hpc3/hpc3.html) — Main HPC3 documentation
+- [SLURM Quick Reference](https://rcic.uci.edu/hpc3/slurm.html) — Job submission guide
+- [Software Modules](https://rcic.uci.edu/hpc3/software.html) — Available software and `module load`
+- [Singularity Containers](https://rcic.uci.edu/hpc3/containers.html) — Container usage on HPC3
+- [CRSP Storage](https://rcic.uci.edu/storage/crsp.html) — Shared research storage
+
+### Anthropic
+
+- [Anthropic API Documentation](https://docs.anthropic.com/) — API reference
+- [Claude Model Card](https://www.anthropic.com/claude) — Model capabilities
+- [Anthropic Cookbook](https://github.com/anthropics/anthropic-cookbook) — Examples and recipes
+
+### Scientific Computing
+
+- [Seurat](https://satijalab.org/seurat/) — R toolkit for single-cell analysis
+- [Scanpy](https://scanpy.readthedocs.io/) — Python toolkit for single-cell analysis
+- [scvi-tools](https://docs.scvi-tools.org/) — Deep learning for single-cell omics
+
 ## License
 
 These patterns are shared for community benefit. Adapt freely for your projects.
