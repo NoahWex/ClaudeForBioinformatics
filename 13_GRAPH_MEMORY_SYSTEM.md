@@ -133,6 +133,19 @@ plan validate <file>    # Check plan structure
 plan index rebuild      # Regenerate .index.json
 ```
 
+### Sync Operations
+
+```bash
+plan sync [path]        # Sync draft to active_plans + sequence YAML
+plan nudge [path]       # Write sync reminder for next session
+plan reconcile [seq]    # Cross-reference plan files vs sequence YAML
+plan reconcile --fix <seq>  # Fix status mismatches (YAML authoritative)
+```
+
+`plan sync` is the primary way agents share plan state. It copies the draft to
+`active_plans/`, rebuilds the index, reconciles with sequence YAML, and removes
+the matching breadcrumb from `.pending_sync.d/`.
+
 ### Knowledge Operations
 
 ```bash
@@ -151,6 +164,25 @@ plan complete <id>      # Debrief and archive
 
 This prompts for lessons learned before archiving.
 
+### Sequence Operations
+
+| Command | Description |
+|---------|-------------|
+| `plan sequence list` | All sequences with progress |
+| `plan sequence status <name>` | Full status with vision and plans |
+| `plan sequence vision <name>` | Vision section only |
+| `plan sequence next <name>` | Next ready plan (JSON with `--json`) |
+| `plan sequence validate <name>` | Check for errors and cycles |
+| `plan sequence scope <name>` | Vision with decisions |
+
+### Session Management
+
+| Command | Description |
+|---------|-------------|
+| `plan enter <seq/plan>` | Claim plan, show vision, create .md |
+| `plan pause "notes"` | Save notes, release ownership |
+| `plan seq-complete "summary"` | Mark complete, unblock downstream |
+
 ## Plan Document Format
 
 ### Frontmatter (YAML)
@@ -165,6 +197,7 @@ supersedes: null            # Previous plan ID if replacing
 blocked_by: []              # Must complete first
 blocks: []                  # Waiting on this
 status: in_progress         # queued | in_progress | blocked | complete
+draft_path: /path/to/draft  # Absolute path to this draft file (set by agent)
 jobs: []                    # Optional SLURM job IDs
 ---
 ```
@@ -258,6 +291,68 @@ source: experiment
 tags: [slurm, hpc, array_jobs]
 ---
 ```
+
+## Sequence Coordination
+
+Sequences coordinate multiple plans toward a shared end goal. While individual plans track tasks within a single work unit, sequences manage the dependencies and flow between them.
+
+See **[14_SEQUENCE_COORDINATION.md](14_SEQUENCE_COORDINATION.md)** for the full standalone guide.
+
+### Quick Reference
+
+```bash
+# Overview
+plan sequence list              # All sequences with progress
+plan sequence status <name>     # Full status with vision + plans
+plan sequence vision <name>     # Vision only (quick re-orient)
+
+# Session management
+plan enter <sequence>/<plan>    # Claim plan, show vision, create .md
+plan pause "notes"              # Save progress notes, release claim
+plan seq-complete "summary"     # Mark complete, unblock downstream
+
+# Validation
+plan sequence validate <name>   # Check for errors, cycles
+plan sequence next <name>       # Next ready plan (for automation)
+```
+
+### Sequence YAML
+
+Sequences live in `.plans/sequences/<name>.yaml`:
+
+```yaml
+name: my_pipeline
+status: active
+auto_progress: prompt     # prompt | silent | disabled
+vision:
+  end_goal: "What success looks like"
+  why_it_matters: "Connection to project goals"
+  current_state: "Where things stand"
+  decisions:
+    - date: "2026-02-05"
+      fork: "What was decided"
+      chose: "What was chosen"
+      rationale: "Why"
+  exit_criteria:
+    - "Verifiable criterion"
+plans:
+  - id: area/plan_name
+    summary: "What this plan does"
+    status: queued
+    depends_on: [upstream_plan]
+```
+
+See `graph-memory/templates/sequence_template.yaml` for a full template.
+
+### When to Use Sequences vs Individual Plans
+
+| Situation | Use |
+|-----------|-----|
+| Single task, no dependencies | Individual plan |
+| 2-3 related tasks, simple order | Individual plans with `blocked_by` |
+| 4+ plans with branching dependencies | Sequence |
+| Shared end goal across work areas | Sequence |
+| Parallel sessions on related work | Sequence (ownership tracking) |
 
 ## Architecture
 

@@ -1,8 +1,8 @@
 # Claude Code Best Practices for Scientific Computing
 
 **Extracted from**: Spatial HBCA Resource Project
-**Version**: 1.1
-**Date**: 2026-02-02
+**Version**: 1.3
+**Date**: 2026-02-09
 
 This guide documents infrastructure patterns and frameworks developed for working with Claude Code in scientific computing environments, particularly for single-cell genomics and HPC-based analysis pipelines.
 
@@ -46,10 +46,10 @@ ClaudeForBioinformatics_NW/
 ├── 11_INTERFACE_AWARE_PLANNING.md   # Multi-component planning (NEW)
 ├── 12_SANDBOX_ENVIRONMENT.md        # Learning sandbox guide
 ├── 13_GRAPH_MEMORY_SYSTEM.md        # Plan and knowledge tracking (NEW)
-├── graph-memory/                    # Portable toolkit (NEW)
+├── graph-memory/                    # Portable toolkit
 │   ├── plan                         # CLI entry point
 │   ├── tools/                       # Python modules
-│   ├── templates/                   # Plan/knowledge templates
+│   ├── templates/                   # Plan/knowledge/sequence templates
 │   └── tests/                       # Verification tests
 ├── templates/
 │   ├── CLAUDE.md                    # Project instruction template
@@ -57,7 +57,13 @@ ClaudeForBioinformatics_NW/
 │   ├── trace-framework.md           # Objectivity framework
 │   ├── experiment_metadata.yaml     # Experiment config template
 │   ├── slurm_template_R.sh          # SLURM R job template
-│   └── slurm_template_python.sh     # SLURM Python job template
+│   ├── slurm_template_python.sh     # SLURM Python job template
+│   └── hooks/                       # Plan coordination hooks (NEW)
+│       ├── pre_exit_plan.sh         # Plan validation (PreToolUse)
+│       ├── post_exit_plan.sh        # Sync breadcrumb (PostToolUse)
+│       ├── session_orient.sh        # Session startup (SessionStart)
+│       ├── pre_compact_plan.sh      # Context preservation (PreCompact)
+│       └── plan_md_reminder.sh      # Plan structure reminder (PreToolUse)
 └── sandbox/                         # Hands-on learning environment
     ├── README.md                    # Sandbox quickstart
     ├── config/                      # Configurable settings
@@ -152,6 +158,16 @@ Claude Code features used:
 - Agents (`.claude/agents/`)
 
 ## Changelog
+
+### v1.3 (2026-02-09)
+- **Plan sync pipeline**: Deterministic `draft_path` frontmatter field for multi-session plan discovery
+- **Breadcrumb system**: `.pending_sync.d/` directory replaces single-file breadcrumb for per-plan granularity
+- **Hook templates**: Five coordination hooks (pre-exit validation, post-exit breadcrumb, session orient, pre-compact state, plan-md reminder) in `templates/hooks/`
+- **New commands**: `plan sync`, `plan nudge`, `plan reconcile` for draft-to-index pipeline
+- **PreCompact hook**: Preserves plan state through context compaction
+- **Hook event docs**: Documented override behavior, matchers, output format, and troubleshooting
+- **SequenceScope removed**: Legacy `scope:` key now raises error; use `vision:` format only
+- **Code sync**: Updated `graph-memory/tools/` with breadcrumb cleanup, auto-reconcile, and scope removal
 
 ### v1.2 (2026-02-04)
 - **Graph Memory System**: Added plan and knowledge tracking toolkit (`graph-memory/`)

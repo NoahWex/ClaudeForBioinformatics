@@ -185,6 +185,115 @@ This injects the trace-framework content at session start, ensuring objectivity 
 |------|-------------|
 | `command` | Run shell command, output injected into context |
 
+### Hook Events
+
+| Event | When | Can Block? |
+|-------|------|------------|
+| `SessionStart` | New session begins | No |
+| `PreToolUse` | Before a tool executes | Yes (`permissionDecision: deny`) |
+| `PostToolUse` | After a tool executes | No |
+| `PreCompact` | Before context compaction | No (observe only) |
+
+### PreToolUse Matchers
+
+Restrict when a hook fires using the `matcher` field:
+
+```json
+{
+  "matcher": "ExitPlanMode",
+  "hooks": [{"type": "command", "command": "~/.claude/hooks/pre_exit_plan.sh"}]
+}
+```
+
+Matchers support pipe-delimited patterns:
+
+```json
+{
+  "matcher": "Edit|Write",
+  "hooks": [{"type": "command", "command": "~/.claude/hooks/plan_md_reminder.sh"}]
+}
+```
+
+### Hook Output Format
+
+Hooks communicate via JSON on stdout:
+
+```json
+{
+  "hookSpecificOutput": {
+    "hookEventName": "PreToolUse",
+    "permissionDecision": "allow",
+    "additionalContext": "Message visible to agent (not user)"
+  },
+  "systemMessage": "Message visible to user terminal (not agent)"
+}
+```
+
+- `additionalContext` → injected into agent context (the agent sees this)
+- `systemMessage` → shown in terminal (the user sees this)
+- `permissionDecision` → `"allow"` or `"deny"` (PreToolUse only)
+
+### Hook Event Override Behavior
+
+**Project-level hooks override global hooks per event.** If `.claude/settings.local.json`
+defines `SessionStart`, global `~/.claude/settings.json` hooks for `SessionStart` do NOT fire.
+Other events (e.g., `PreToolUse`) from global settings still fire unless also overridden.
+
+This means: if you add a project-level `SessionStart` hook, you must duplicate any global
+`SessionStart` hooks you still want to run. The session orient hook (see below) warns
+when global events are missing from the project config.
+
+### Plan Coordination Hooks
+
+For projects using the sequence coordination system, five hooks form the
+draft→validate→sync pipeline. See [14_SEQUENCE_COORDINATION.md](14_SEQUENCE_COORDINATION.md)
+for the full pipeline design.
+
+Template scripts are provided in `templates/hooks/`:
+
+| Hook | Event | Matcher | Purpose |
+|------|-------|---------|---------|
+| `pre_exit_plan.sh` | PreToolUse | ExitPlanMode | Validate plan structure before approval |
+| `post_exit_plan.sh` | PostToolUse | ExitPlanMode | Write sync breadcrumb for next session |
+| `session_orient.sh` | SessionStart | — | Inject sequence status + pending sync warnings |
+| `pre_compact_plan.sh` | PreCompact | — | Preserve plan state through context compaction |
+| `plan_md_reminder.sh` | PreToolUse | Edit\|Write | Remind about plan structure in plan mode |
+
+Full settings configuration example:
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "ExitPlanMode",
+        "hooks": [{"type": "command", "command": "~/.claude/hooks/pre_exit_plan.sh", "timeout": 10}]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [{"type": "command", "command": "~/.claude/hooks/plan_md_reminder.sh", "timeout": 3}]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "ExitPlanMode",
+        "hooks": [{"type": "command", "command": "~/.claude/hooks/post_exit_plan.sh", "timeout": 5}]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [{"type": "command", "command": "~/.claude/hooks/session_orient.sh", "timeout": 10}]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [{"type": "command", "command": "~/.claude/hooks/pre_compact_plan.sh", "timeout": 5}]
+      }
+    ]
+  }
+}
+```
+
 ## Language Server Plugins
 
 Enable language-specific intelligence:
@@ -332,6 +441,9 @@ Verify:
 1. File exists at specified path
 2. Command syntax is valid
 3. JSON is properly formatted
+4. **Check for event override**: If your project defines `hooks` in `settings.local.json`,
+   global hooks for the same event names are silently suppressed. Add missing events to
+   the project config.
 
 ### Plugin Not Working
 
